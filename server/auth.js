@@ -58,15 +58,52 @@ class Auth {
 
   bootstrap() {
     if (!this.enabled) { this.log('WARNING: AUTH=off — anyone who can reach this server has full control. Use only on a private LAN.'); return; }
-    if (this.users.length) return;
-    const name = validName(process.env.ADMIN_USER) ? process.env.ADMIN_USER : 'admin';
-    let pw = process.env.ADMIN_PASSWORD;
-    let generated = false;
-    if (!pw || pwProblem(pw)) { pw = crypto.randomBytes(12).toString('base64url'); generated = true; }
-    this.users.push({ username: name, hash: hashPassword(pw), role: 'admin', created: new Date().toISOString(), mustChange: generated });
+    if (this.users.length) { this.setupMode = false; return; }
+    const pw = process.env.ADMIN_PASSWORD;
+    if (pw && !pwProblem(pw)) {           // unattended install: admin from environment
+      const name = validName(process.env.ADMIN_USER) ? process.env.ADMIN_USER : 'admin';
+      this.users.push({ username: name, hash: hashPassword(pw), role: 'admin', created: new Date().toISOString(), mustChange: false });
+      this.saveUsers();
+      this.log(`First start: created admin user '${name}' from ADMIN_USER/ADMIN_PASSWORD.`);
+      this.setupMode = false;
+      return;
+    }
+    if (pw) this.log('ADMIN_PASSWORD is shorter than 10 characters — ignored; use the setup page instead.');
+    // first-run setup mode
+    this.setupMode = true;
+    const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', rb = crypto.randomBytes(8);
+    this.setupCode = Array.from(rb, x => A[x % A.length]).join('').replace(/(.{4})(.{4})/, '$1-$2');
+    this.log(`\n============================================================\n  PLCFACTORY first-run setup\n  Open the web UI to create the administrator account.\n  From your local network no code is needed. From anywhere else\n  (or through a reverse proxy) enter this one-time setup code:\n\n      ${this.setupCode}\n============================================================`);
+  }
+
+  /** True when the request comes straight from a private (LAN) address, not through a proxy. */
+  isLocal(req) {
+    const proxied = !!(req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.headers['forwarded'] || req.headers['cf-connecting-ip']);
+    if (proxied && !this.trustProxy) return false;          // can't tell who is behind the proxy
+    let ip = this.clientIp(req).replace(/^::ffff:/, '');
+    return ip === '::1' || /^127\./.test(ip) || /^10\./.test(ip) || /^192\.168\./.test(ip) || /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
+      /^169\.254\./.test(ip) || /^f[cd][0-9a-f]{2}:/i.test(ip) || /^fe80:/i.test(ip);
+  }
+  setupInfo(req) { return { setup: !!this.setupMode, codeRequired: !!this.setupMode && !this.isLocal(req) }; }
+  setup(req, res, b) {
+    if (!this.setupMode) return { status: 409, body: { ok: false, msg: 'Setup is already complete' } };
+    const keys = [this.clientIp(req)];
+    const mins = this.locked(keys);
+    if (mins) return { status: 429, body: { ok: false, msg: `Too many attempts. Try again in ${mins} min.` } };
+    if (!this.isLocal(req)) {
+      const code = String(b.code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+      const want = this.setupCode.replace('-', '');
+      const ok = code.length === want.length && crypto.timingSafeEqual(Buffer.from(code), Buffer.from(want));
+      if (!ok) { this.fail(keys); this.log(`Setup: wrong setup code from ${this.clientIp(req)}`); return { status: 403, body: { ok: false, msg: 'Wrong setup code — check the container log' } }; }
+    }
+    const name = String(b.username || '').trim();
+    if (!validName(name)) return { status: 400, body: { ok: false, msg: 'Username: 2–32 letters, digits, . _ -' } };
+    const p = pwProblem(b.password); if (p) return { status: 400, body: { ok: false, msg: p } };
+    this.users = [{ username: name, hash: hashPassword(b.password), role: 'admin', created: new Date().toISOString(), mustChange: false }];
     this.saveUsers();
-    if (generated) this.log(`\n============================================================\n  First start: created admin user '${name}'\n  Temporary password: ${pw}\n  Log in and change it (menu ⋯ → Change password).\n============================================================`);
-    else this.log(`First start: created admin user '${name}' from ADMIN_USER/ADMIN_PASSWORD.`);
+    this.setupMode = false; this.setupCode = null;
+    this.log(`Setup complete: administrator '${name}' created from ${this.clientIp(req)}`);
+    return Object.assign(this.login(req, res, { username: name, password: b.password }), {});
   }
 
   clientIp(req) {
@@ -116,6 +153,7 @@ class Auth {
   }
 
   login(req, res, b) {
+    if (this.setupMode) return { status: 409, body: { ok: false, setup: true, msg: 'First-run setup is not finished' } };
     const keys = this.throttleKey(req, b.username);
     this.maybeReload();
     const mins = this.locked(keys);
@@ -177,6 +215,7 @@ class Auth {
     this.saveUsers();
     return { ok: true };
   }
+  factoryReset() { this.users = []; this.saveUsers(); this.sessions.clear(); this.saveSessions(); }
   remove(me, b) {
     const u = this.users.find(x => x.username === b.username);
     if (!u) return { ok: false, msg: 'No such user' };

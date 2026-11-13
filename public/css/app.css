@@ -392,3 +392,9 @@ input.rc:hover,input.rc:focus{border-bottom-color:var(--line2);outline:0}
 .ldprops label{display:flex;flex-direction:column;gap:2px;font:600 11px var(--cond);letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
 .ldprops input{font:13px var(--mono);width:170px;text-transform:none}
 .ldprops select{text-transform:none;font:13px var(--sans)}
+.setup-card{max-width:420px}
+.setup-step{font:700 11px var(--cond);letter-spacing:.2em;color:var(--accent);border-bottom:1px solid var(--line);padding-bottom:6px}
+.login-card .hint{float:right;text-transform:none;letter-spacing:0;font:400 11px var(--sans);color:var(--dim)}
+.meter{height:4px;background:#0d0f11;border:1px solid var(--line);margin-top:-6px}
+.meter i{display:block;height:100%;width:0;transition:width .15s}
+@media (max-width:600px){ .login-page .brand>span:not(.mark){display:inline} .login-page .brand small{display:none} }

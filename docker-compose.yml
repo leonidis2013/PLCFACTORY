@@ -6,8 +6,9 @@ services:
     restart: unless-stopped
     environment:
       - TZ=America/Chicago
-      # First start only: name/password for the initial admin. If ADMIN_PASSWORD is not set,
-      # a random temporary password is printed in the container log.
+      # On first start the web UI opens a setup page to create the administrator.
+      # (From outside your LAN it asks for a one-time code printed in the container log.)
+      # For unattended installs you can create the admin here instead:
       # - ADMIN_USER=admin
       # - ADMIN_PASSWORD=change-me-please
       # Behind an HTTPS reverse proxy / Cloudflare Tunnel: trust X-Forwarded-For/-Proto

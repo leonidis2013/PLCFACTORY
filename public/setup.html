@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d0f11">
+<title>PLCFACTORY — First-time setup</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body class="login-page">
+<header id="top"><div class="brand"><span class="mark"></span><span>PLC<b>FACTORY</b></span><small>SOFT PLC · SCADA TRAINER</small></div></header>
+<main class="login-wrap">
+  <form id="setupForm" class="card login-card setup-card" autocomplete="on">
+    <div class="setup-step">FIRST-TIME SETUP</div>
+    <h3>Create the administrator</h3>
+    <p class="muted small">This account can program the PLC and manage users. You can add more users (viewer, operator, engineer, admin) after signing in.</p>
+    <label>Username<input id="u" name="username" value="admin" autocomplete="username" autocapitalize="off" spellcheck="false" required maxlength="32"></label>
+    <label>Password <span class="hint">10+ characters</span><input id="p" name="password" type="password" autocomplete="new-password" minlength="10" required></label>
+    <div class="meter"><i id="meter"></i></div>
+    <label>Repeat password<input id="p2" type="password" autocomplete="new-password" minlength="10" required></label>
+    <div id="codeBox" hidden>
+      <label>Setup code<input id="code" class="mono" placeholder="XXXX-XXXX" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false"></label>
+      <p class="muted small">You're not on the local network (or you're coming through a proxy), so a one-time code is required. It is printed in the container log. On TrueNAS: <b>Apps → plcfactory → Logs</b>.</p>
+    </div>
+    <div id="err" class="login-err" hidden></div>
+    <button class="primary" type="submit" id="go">Create administrator &amp; sign in</button>
+  </form>
+</main>
+<script src="js/setup.js"></script>
+</body>
+</html>

@@ -8,6 +8,7 @@ f.addEventListener('submit', async e => {
     const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: document.getElementById('u').value.trim(), password: document.getElementById('p').value }) });
     const j = await r.json();
+    if (j.setup) { location.replace('/setup.html'); return; }
     if (j.ok) {
       const next = new URLSearchParams(location.search).get('next');
       location.replace(next && next.startsWith('/') && !next.startsWith('//') ? next : '/');

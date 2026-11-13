@@ -53,7 +53,7 @@ docker build -t ghcr.io/leonidis2013/plcfactory:latest . && docker compose up -d
 | `MODBUS` | on | Set to `off` to disable Modbus |
 | `DATA_DIR` | `/data` | Projects (`projects/<plant>.json`) and settings |
 
-| `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / random | Initial admin account, used only when no users exist yet |
+| `ADMIN_USER` / `ADMIN_PASSWORD` | — | Optional: create the first admin without the setup page (only when no users exist) |
 | `TRUST_PROXY` | off | Set `true` behind a reverse proxy so client IPs and HTTPS are detected |
 | `COOKIE_SECURE` | auto | Force the `Secure` cookie flag |
 | `SESSION_DAYS` | `7` | Sign-in lifetime (sliding) |
@@ -61,7 +61,15 @@ docker build -t ghcr.io/leonidis2013/plcfactory:latest . && docker compose up -d
 
 ## Security & users
 
-Sign-in is **on by default**. On first start the container creates an `admin` user. If `ADMIN_PASSWORD` isn't set, it prints a random temporary password in the container log. You're forced to change it at first sign-in.
+Sign-in is **on by default**.
+
+**First-time setup:** on first start, every page redirects to **Create the administrator**. Pick a username and a password of 10+ characters, and you're signed in.
+
+- If you connect from your **local network**, that's all.
+- If you connect from **outside, or through a reverse proxy**, the page also asks for a **one-time setup code**. It's printed in the container log (TrueNAS: Apps → plcfactory → Logs), so nobody else can claim the server before you.
+- Finish setup **before** you port-forward or publish it.
+- For unattended installs, set `ADMIN_USER`/`ADMIN_PASSWORD` instead.
+- To start over: `node server/auth-cli.js reset-all`, then restart.
 
 | Role | Can |
 |---|---|
@@ -89,6 +97,7 @@ Locked out? Run this inside the container:
 ```bash
 docker exec -it plcfactory node server/auth-cli.js list
 docker exec -it plcfactory node server/auth-cli.js reset admin 'a-new-long-password'
+docker exec -it plcfactory node server/auth-cli.js reset-all     # delete all users → setup page after restart
 ```
 
 ## Development

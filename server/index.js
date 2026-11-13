@@ -122,7 +122,7 @@ const PERM = {
   'POST /api/scenario': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
   'GET /api/users': 'admin', 'POST /api/users': 'admin', 'POST /api/users/delete': 'admin',
 };
-const PUBLIC = new Set(['/login.html', '/js/login.js', '/css/app.css', '/healthz', '/api/login']);
+const PUBLIC = new Set(['/login.html', '/js/login.js', '/setup.html', '/js/setup.js', '/css/app.css', '/healthz', '/api/login', '/api/setup']);
 function secHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -219,6 +219,14 @@ const server = http.createServer(async (req, res) => {
       return send(res, r.status, r.body);
     }
     if (key === 'POST /api/logout') return send(res, 200, auth.logout(req, res));
+    // ---- first-run setup ----
+    if (key === 'GET /api/setup') return send(res, 200, auth.setupInfo(req));
+    if (key === 'POST /api/setup') { const r = auth.setup(req, res, await body(req)); return send(res, r.status, r.body); }
+    if (auth.setupMode) {
+      if (url.pathname === '/setup.html' || url.pathname === '/js/setup.js' || url.pathname === '/css/app.css' || url.pathname === '/healthz') { /* serve below */ }
+      else if (url.pathname.startsWith('/api/')) return send(res, 503, { ok: false, setup: true, msg: 'First-run setup is not finished' });
+      else { res.writeHead(302, { Location: '/setup.html' }); return res.end(); }
+    } else if (url.pathname === '/setup.html') { res.writeHead(302, { Location: '/' }); return res.end(); }
     const me = auth.user(req);
     if (!me && !PUBLIC.has(url.pathname)) {
       if (url.pathname.startsWith('/api/')) return send(res, 401, { ok: false, msg: 'Not logged in' });
