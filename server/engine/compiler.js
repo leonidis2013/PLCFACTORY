@@ -3,7 +3,9 @@
  * PLCFACTORY — IEC 61131-3 Structured Text compiler (subset)
  * Compiles ST source into JavaScript closures bound directly to tag objects.
  *
- * Supported: VAR blocks, BOOL/INT/DINT/REAL/LREAL/TIME (+ integer aliases),
+ * Supported: TYPE/STRUCT (UDTs), ARRAY[lo..hi] OF, VAR/VAR_GLOBAL blocks, BOOL/INT/DINT/REAL/LREAL/TIME,
+ * member/index/bit access (Motor.Tmr.Q, Track[i].Bad, Word.3), BSL/BSR array shift registers,
+ * SHL/SHR/ROL/ROR, bitwise AND/OR/XOR/NOT on integers, FB_RESET,
  * :=, IF/ELSIF/ELSE, CASE (lists + ranges), FOR, WHILE, REPEAT, EXIT, RETURN,
  * AND/OR/XOR/NOT/&, = <> < > <= >=, + - * / MOD, T#.. time literals,
  * function blocks TON TOF TP CTU CTD CTUD R_TRIG F_TRIG SR RS,
@@ -14,7 +16,7 @@ class PlcError extends Error { constructor(line, msg) { super(msg); this.line = 
 class RtError extends Error {}
 const EXIT = { exit: true }, RETURN = { ret: true };
 
-const KW = new Set(('PROGRAM END_PROGRAM VAR END_VAR IF THEN ELSIF ELSE END_IF CASE OF END_CASE ' +
+const KW = new Set(('PROGRAM END_PROGRAM VAR VAR_GLOBAL END_VAR TYPE END_TYPE STRUCT END_STRUCT ARRAY IF THEN ELSIF ELSE END_IF CASE OF END_CASE ' +
   'FOR TO BY DO END_FOR WHILE END_WHILE REPEAT UNTIL END_REPEAT AND OR XOR NOT MOD TRUE FALSE EXIT RETURN').split(' '));
 
 const ELEM = { BOOL: 'BOOL', INT: 'INT', DINT: 'INT', SINT: 'INT', LINT: 'INT', UINT: 'INT', UDINT: 'INT', USINT: 'INT',
@@ -157,7 +159,7 @@ function tokenize(src) {
     }
     const two = src.substr(i, 2);
     if ([':=', '<=', '>=', '<>', '=>', '..'].includes(two)) { toks.push({ t: 'op', v: two, line }); i += 2; continue; }
-    if ('+-*/()=<>;:,.&'.includes(c)) { toks.push({ t: 'op', v: c, line }); i++; continue; }
+    if ('+-*/()=<>;:,.&[]'.includes(c)) { toks.push({ t: 'op', v: c, line }); i++; continue; }
     throw new PlcError(line, `Unexpected character '${c}'`);
   }
   toks.push({ t: 'eof', v: '', line });
@@ -166,9 +168,50 @@ function tokenize(src) {
 
 const seqf = ss => { if (!ss.length) return () => {}; if (ss.length === 1) return ss[0]; return () => { for (let i = 0; i < ss.length; i++) ss[i](); }; };
 const arithTy = (a, b) => (a === 'REAL' || b === 'REAL') ? 'REAL' : (a === 'TIME' || b === 'TIME') ? 'TIME' : 'INT';
+const MAX_ARRAY = 2000;
+
+// ---------- type system ----------
+// elementary {k:'e', b, name} · struct {k:'s', name, fields:[{name,N,t,init}]} · array {k:'a', lo, hi, of, name} · fb {k:'f', name}
+const ET = {};
+for (const n of Object.keys(ELEM)) ET[n] = { k: 'e', b: ELEM[n], name: n };
+const BOOLT = ET.BOOL;
+const elemT = b => ({ BOOL: ET.BOOL, INT: ET.DINT, REAL: ET.REAL, TIME: ET.TIME })[b] || ET.REAL;
+function tagType(tag) {
+  if (tag.t) return tag.t;
+  if (tag.kind === 'FB') return { k: 'f', name: tag.type };
+  return ET[tag.type] || elemT(tag.base);
+}
+function makeVal(t, init) {
+  switch (t.k) {
+    case 'e': return init !== undefined ? coerce(t.b, init) : defVal(t.b);
+    case 's': { const o = {}; for (const f of t.fields) o[f.N] = makeVal(f.t, init && init[f.N] !== undefined ? init[f.N] : f.init); return o; }
+    case 'a': { const a = []; for (let i = 0; i <= t.hi - t.lo; i++) a.push(makeVal(t.of, Array.isArray(init) ? init[i] : t.init ? t.init[i] : undefined)); return a; }
+    case 'f': return Object.assign(newFb(t.name), t.init || {}, init || {});
+  }
+}
+function clone(t, v) {
+  switch (t.k) {
+    case 'e': return v;
+    case 's': { const o = {}; for (const f of t.fields) o[f.N] = clone(f.t, v[f.N]); return o; }
+    case 'a': return v.map(x => clone(t.of, x));
+    case 'f': return Object.assign({}, v);
+  }
+}
+function sameType(a, b) {
+  if (!a || !b || a.k !== b.k) return false;
+  if (a.k === 'e') return a.b === b.b;
+  if (a.k === 'a') return a.hi - a.lo === b.hi - b.lo && sameType(a.of, b.of);
+  return a === b || a.name === b.name;
+}
+function fbReset(st, T) {
+  const d = FB_TYPES[T];
+  for (const k in d.out) st[k] = defVal(d.out[k]);
+  st._p = false; st._p2 = false; st.I = st.I !== undefined && T === 'PID' ? 0 : st.I;
+  if (T === 'CTD' || T === 'CTUD') st.CV = 0;
+}
 
 class Parser {
-  constructor(toks, tags) { this.t = toks; this.i = 0; this.tags = tags; this.declared = []; }
+  constructor(toks, ctx) { this.t = toks; this.i = 0; this.ctx = ctx; this.tags = ctx.tags; }
   peek(o = 0) { return this.t[Math.min(this.i + o, this.t.length - 1)]; }
   next() { return this.t[this.i++]; }
   isKw(v) { const p = this.peek(); return p.t === 'kw' && p.v === v; }
@@ -184,49 +227,125 @@ class Parser {
   expId() { const p = this.peek(); if (p.t !== 'id') this.fail('Expected a name'); this.i++; return p; }
   ref(id) {
     const tag = this.tags[id.v.toUpperCase()];
-    if (!tag) throw new PlcError(id.line, `Undeclared variable '${id.v}'. Declare it in a VAR ... END_VAR block.`);
+    if (!tag) throw new PlcError(id.line, `Undeclared variable '${id.v}'. Declare it in a VAR ... END_VAR block (or in Globals).`);
     return tag;
   }
 
-  program() {
+  // ---------- top level ----------
+  unit() {
     const body = [];
     if (this.accKw('PROGRAM')) this.expId();
     while (!(this.peek().t === 'eof' || this.isKw('END_PROGRAM'))) {
-      if (this.isKw('VAR')) this.varBlock(); else body.push(this.stmt());
+      if (this.isKw('VAR') || this.isKw('VAR_GLOBAL')) this.varBlock();
+      else if (this.isKw('TYPE')) this.typeBlock();
+      else body.push(this.stmt());
     }
     this.accKw('END_PROGRAM');
     const b = seqf(body);
     return () => { try { b(); } catch (e) { if (e !== RETURN) throw e; } };
   }
 
+  // ---------- types ----------
+  typeSpec() {
+    if (this.accKw('ARRAY')) {
+      this.expOp('[');
+      const lo = this.constInt(), _ = this.expOp('..'), hi = this.constInt();
+      const line = this.peek().line;
+      if (this.isOp(',')) throw new PlcError(line, 'Multi-dimensional arrays are not supported — use an array of a STRUCT, or an ARRAY OF ARRAY type');
+      this.expOp(']');
+      this.expKw('OF');
+      const of = this.typeSpec();
+      if (hi < lo) throw new PlcError(line, `Array upper bound ${hi} is below lower bound ${lo}`);
+      if (hi - lo + 1 > MAX_ARRAY) throw new PlcError(line, `Arrays are limited to ${MAX_ARRAY} elements`);
+      return { k: 'a', lo, hi, of, name: `ARRAY[${lo}..${hi}] OF ${of.name}` };
+    }
+    const id = this.expId(), T = id.v.toUpperCase();
+    if (ET[T]) return ET[T];
+    if (FB_TYPES[T]) return { k: 'f', name: T };
+    if (this.ctx.types[T]) return this.ctx.types[T];
+    throw new PlcError(id.line, `Unknown type '${id.v}'. Use BOOL, INT, DINT, REAL, TIME, ARRAY[..] OF, a function block (TON, CTU, PID…) or a TYPE you declared`);
+  }
+  constInt() {
+    const neg = this.accOp('-');
+    const p = this.peek();
+    if (p.t === 'num') { this.i++; return neg ? -p.v : p.v; }
+    if (p.t === 'id' && this.tags[p.v.toUpperCase()] && this.tags[p.v.toUpperCase()].constant) { this.i++; const v = this.tags[p.v.toUpperCase()].v; return neg ? -v : v; }
+    this.fail('Expected a whole number');
+  }
+  typeBlock() {
+    this.expKw('TYPE');
+    while (!this.accKw('END_TYPE')) {
+      if (this.peek().t === 'eof') this.fail('Expected END_TYPE');
+      const nameTok = this.expId(), N = nameTok.v.toUpperCase();
+      if (this.ctx.types[N] || ET[N] || FB_TYPES[N]) throw new PlcError(nameTok.line, `Type '${nameTok.v}' is already defined`);
+      this.expOp(':');
+      if (this.accKw('STRUCT')) {
+        const t = { k: 's', name: nameTok.v, fields: [] };
+        this.ctx.types[N] = t;            // allows arrays of itself? no — but lets later types refer to it
+        while (!this.accKw('END_STRUCT')) {
+          if (this.peek().t === 'eof') this.fail('Expected END_STRUCT');
+          const names = [this.expId()];
+          while (this.accOp(',')) names.push(this.expId());
+          this.expOp(':');
+          const ft = this.typeSpec();
+          if (ft === t) throw new PlcError(names[0].line, 'A STRUCT cannot contain itself');
+          let init;
+          if (this.accOp(':=')) init = this.initValue(ft);
+          this.expOp(';');
+          for (const n of names) {
+            const FN = n.v.toUpperCase();
+            if (t.fields.some(f => f.N === FN)) throw new PlcError(n.line, `Duplicate member '${n.v}'`);
+            t.fields.push({ name: n.v, N: FN, t: ft, init });
+          }
+        }
+        if (!t.fields.length) throw new PlcError(nameTok.line, `STRUCT '${nameTok.v}' has no members`);
+      } else {
+        const alias = this.typeSpec();
+        this.ctx.types[N] = Object.assign({}, alias, { name: nameTok.v });
+      }
+      this.accOp(';');
+    }
+    this.accOp(';');
+  }
+  // constant initialisers: 5 · (A := 1, B := TRUE) · [1, 2, 3]
+  initValue(t) {
+    if (t.k === 'e') return coerce(t.b, this.expr().f());
+    if (t.k === 'a') {
+      this.expOp('[', ' — initialise an array like  := [1, 2, 3]');
+      const a = [];
+      if (!this.isOp(']')) do { a.push(this.initValue(t.of)); } while (this.accOp(','));
+      this.expOp(']');
+      return a;
+    }
+    this.expOp('(', ` — initialise a ${t.name} like  := (NAME := value, ...)`);
+    const o = {};
+    if (!this.isOp(')')) {
+      do {
+        const pn = this.expId(), P = pn.v.toUpperCase();
+        let ft;
+        if (t.k === 'f') { const d = FB_TYPES[t.name]; if (!(P in d.in)) throw new PlcError(pn.line, `${t.name} has no input '${pn.v}'. Inputs: ${Object.keys(d.in).join(', ')}`); ft = ET[d.in[P]] || elemT(ELEM[d.in[P]]); }
+        else { const f = t.fields.find(x => x.N === P); if (!f) throw new PlcError(pn.line, `${t.name} has no member '${pn.v}'`); ft = f.t; }
+        this.expOp(':=');
+        o[P] = this.initValue(ft);
+      } while (this.accOp(','));
+    }
+    this.expOp(')');
+    return o;
+  }
+
   varBlock() {
-    this.expKw('VAR');
+    this.next();   // VAR or VAR_GLOBAL
+    let constant = false;
     const p0 = this.peek();
-    if (p0.t === 'id' && /^(RETAIN|PERSISTENT|CONSTANT)$/i.test(p0.v)) this.i++;
+    if (p0.t === 'id' && /^(RETAIN|PERSISTENT|CONSTANT)$/i.test(p0.v)) { constant = /^CONSTANT$/i.test(p0.v); this.i++; }
     while (!this.accKw('END_VAR')) {
       if (this.peek().t === 'eof') this.fail('Expected END_VAR');
       const names = [this.expId()];
       while (this.accOp(',')) names.push(this.expId());
       this.expOp(':');
-      const tp = this.expId();
-      const T = tp.v.toUpperCase();
-      let init, fbInit = null;
-      if (this.accOp(':=')) {
-        if (FB_TYPES[T]) {
-          // structured initial values: Tmr : TON := (PT := T#5s);
-          fbInit = {};
-          this.expOp('(', ` — initialise a ${T} like  := (NAME := value, ...)`);
-          if (!this.isOp(')')) {
-            do {
-              const pn = this.expId(), P = pn.v.toUpperCase(), def = FB_TYPES[T];
-              if (!(P in def.in)) throw new PlcError(pn.line, `${T} has no input '${pn.v}'. Inputs: ${Object.keys(def.in).join(', ')}`);
-              this.expOp(':=');
-              fbInit[P] = coerce(ELEM[def.in[P]], this.expr().f());
-            } while (this.accOp(','));
-          }
-          this.expOp(')');
-        } else init = this.expr().f();
-      }
+      const t = this.typeSpec();
+      let init;
+      if (this.accOp(':=')) init = this.initValue(t);
       this.expOp(';');
       for (const n of names) {
         const K = n.v.toUpperCase();
@@ -234,15 +353,65 @@ class Parser {
           const o = this.tags[K];
           throw new PlcError(n.line, `'${n.v}' is already declared${o.kind !== 'MEM' && o.kind !== 'FB' ? ' (it is a built-in I/O or system tag)' : ''}`);
         }
+        if (this.ctx.types[K]) throw new PlcError(n.line, `'${n.v}' is the name of a TYPE — pick another variable name`);
         let tag;
-        if (FB_TYPES[T]) tag = { name: n.v, type: T, kind: 'FB', fb: Object.assign(newFb(T), fbInit || {}), desc: FB_TYPES[T].desc };
-        else if (ELEM[T]) tag = { name: n.v, type: T, base: ELEM[T], kind: 'MEM', v: init !== undefined ? coerce(ELEM[T], init) : defVal(ELEM[T]), desc: '' };
-        else throw new PlcError(tp.line, `Unknown type '${tp.v}'. Use BOOL, INT, DINT, REAL, TIME or a function block (TON, CTU, R_TRIG ...)`);
+        if (t.k === 'f') { const st = makeVal(t, init); tag = { name: n.v, type: t.name, kind: 'FB', fb: st, v: st, t, desc: FB_TYPES[t.name].desc }; }
+        else if (t.k === 'e') tag = { name: n.v, type: t.name, base: t.b, kind: 'MEM', v: makeVal(t, init), t, desc: '', constant };
+        else tag = { name: n.v, type: t.name, kind: 'MEM', v: makeVal(t, init), t, desc: '' };
         this.tags[K] = tag;
-        this.declared.push(K);
+        this.ctx.declared.push(K);
       }
     }
     this.accOp(';');
+  }
+
+  // ---------- access paths: Var · Var.Member · Var[i] · Var.3 (bit) · FbInst.Q ----------
+  path(id) {
+    const tag = this.ref(id);
+    let t = tagType(tag), name = id.v, readonly = tag.kind === 'SYS' || tag.constant, fbOut = false;
+    let get = tag.kind === 'FB' ? () => tag.fb : () => tag.v;
+    let set = tag.kind === 'FB' ? null : v => { tag.v = v; };
+    let depth = 0;
+    for (;;) {
+      if (this.isOp('.')) {
+        this.i++;
+        const m = this.next();
+        const g = get, s = set;
+        if (t.k === 's' && m.t === 'id') {
+          const f = t.fields.find(x => x.N === m.v.toUpperCase());
+          if (!f) throw new PlcError(m.line, `${t.name} has no member '${m.v}'. Members: ${t.fields.map(x => x.name).join(', ')}`);
+          const F = f.N;
+          get = () => g()[F]; set = v => { g()[F] = v; }; t = f.t; name += '.' + f.name;
+        } else if (t.k === 'f' && m.t === 'id') {
+          const d = FB_TYPES[t.name], M = m.v.toUpperCase(), ty = d.in[M] || d.out[M];
+          if (!ty) throw new PlcError(m.line, `${t.name} has no member '${m.v}'. Members: ${[...Object.keys(d.in), ...Object.keys(d.out)].join(', ')}`);
+          fbOut = !(M in d.in);
+          get = () => g()[M]; set = v => { g()[M] = v; }; t = ET[ty] || elemT(ELEM[ty]); name += '.' + M;
+        } else if (t.k === 'e' && t.b === 'INT' && m.t === 'num' && Number.isInteger(m.v) && m.v >= 0 && m.v < 32) {
+          const n = m.v;
+          get = () => ((g() >>> n) & 1) === 1;
+          set = v => { s(v ? (g() | (1 << n)) : (g() & ~(1 << n))); };
+          t = BOOLT; name += '.' + n;
+        } else if (t.k === 'e' && m.t === 'num') {
+          throw new PlcError(m.line, `Bit access needs an integer variable and a bit number 0–31 (e.g. Word.3)`);
+        } else throw new PlcError(m.line, `'${name}' has no members`);
+      } else if (this.isOp('[')) {
+        if (t.k !== 'a') throw new PlcError(this.peek().line, `'${name}' is not an array`);
+        const line = this.peek().line;
+        this.i++;
+        const e = this.expr(); this.expOp(']');
+        this.elem(e, line);
+        const lo = t.lo, hi = t.hi, g = get, ef = e.f;
+        const idx = () => { const i = Math.trunc(num(ef())); if (!(i >= lo && i <= hi)) throw new RtError(`Array index ${i} out of range [${lo}..${hi}] for ${name} (line ${line})`); return i - lo; };
+        get = () => g()[idx()]; set = v => { g()[idx()] = v; }; t = t.of; name += '[]';
+      } else break;
+      depth++;
+    }
+    return { t, get, set, name, tag, readonly: readonly && depth === 0, fbOut, line: id.line };
+  }
+  elem(e, line) {
+    if (e.ty === 'ANY') throw new PlcError(line || this.peek().line, `A ${e.t ? e.t.name : 'structure'} can't be used in an expression — pick one of its members`);
+    return e;
   }
 
   block(ends) {
@@ -266,56 +435,58 @@ class Parser {
         case 'REPEAT': return this.repeatStmt();
         case 'EXIT': this.i++; this.accOp(';'); return () => { throw EXIT; };
         case 'RETURN': this.i++; this.accOp(';'); return () => { throw RETURN; };
-        case 'VAR': throw new PlcError(p.line, 'VAR blocks must be at the top level, not inside a statement');
+        case 'VAR': case 'VAR_GLOBAL': case 'TYPE': throw new PlcError(p.line, `${p.v} blocks must be at the top level, not inside a statement`);
       }
       throw new PlcError(p.line, `Unexpected '${p.v}' (check for a missing or extra END_IF / END_CASE / semicolon)`);
     }
     if (p.t === 'id') {
-      if (this.peek(1).t === 'op' && this.peek(1).v === '(') return this.fbCall();
-      const lv = this.lvalue();
+      // procedure-style call of a function (BSL(...), FB_RESET(...)): not a variable
+      if (this.peek(1).t === 'op' && this.peek(1).v === '(' && !this.tags[p.v.toUpperCase()]) {
+        this.i++;
+        const e = this.funcCall(p);
+        this.expOp(';', ' at end of statement');
+        const f = e.f; return () => { f(); };
+      }
+      this.i++;
+      const pa = this.path(p);
+      if (this.isOp('(')) return this.fbCall(pa);
       if (this.isOp('=')) this.fail("Expected ':=' (use := for assignment, = is a comparison)");
       this.expOp(':=');
       const e = this.expr();
       this.expOp(';', ' at end of statement');
-      return lv.assign(e);
+      return this.assign(pa, e);
     }
     this.fail('Expected a statement');
   }
-
-  lvalue() {
-    const id = this.expId();
-    const tag = this.ref(id);
-    if (this.accOp('.')) {
-      const m = this.expId();
-      if (tag.kind !== 'FB') throw new PlcError(m.line, `'${id.v}' is not a function block`);
-      const M = m.v.toUpperCase(), def = FB_TYPES[tag.type];
-      if (!(M in def.in)) throw new PlcError(m.line, `${tag.type}.${m.v} is not a writable input. Inputs: ${Object.keys(def.in).join(', ')}`);
-      const ty = ELEM[def.in[M]];
-      return { assign: e => { const f = e.f, st = tag.fb; return () => { st[M] = coerce(ty, f()); }; } };
-    }
-    if (tag.kind === 'FB') throw new PlcError(id.line, `Can't assign to function block '${id.v}'. Call it instead: ${id.v}(...);`);
-    if (tag.kind === 'SYS') throw new PlcError(id.line, `'${id.v}' is a read-only system tag`);
-    const b = tag.base;
-    return { assign: e => { const f = e.f; return () => { tag.v = coerce(b, f()); }; } };
+  assign(pa, e) {
+    if (pa.readonly) throw new PlcError(pa.line, `'${pa.name}' is read-only`);
+    if (pa.fbOut) throw new PlcError(pa.line, `'${pa.name}' is a function block output and can't be written`);
+    const t = pa.t, set = pa.set;
+    if (t.k === 'f' || !set) throw new PlcError(pa.line, `Can't assign to a function block instance. Call it instead: ${pa.name}(...);`);
+    if (t.k === 'e') { this.elem(e, pa.line); const f = e.f, b = t.b; return () => { set(coerce(b, f())); }; }
+    if (!e.t || !sameType(t, e.t)) throw new PlcError(pa.line, `Type mismatch: '${pa.name}' is ${t.name}${e.t ? ', value is ' + e.t.name : ''}`);
+    const f = e.f; return () => { set(clone(t, f())); };
   }
 
-  fbCall() {
-    const id = this.expId();
-    const tag = this.ref(id);
-    if (tag.kind !== 'FB') throw new PlcError(id.line, `'${id.v}' is not a function block instance, so it can't be called`);
-    const def = FB_TYPES[tag.type], st = tag.fb, sets = [], outs = [];
+  fbCall(pa) {
+    if (pa.t.k !== 'f') throw new PlcError(pa.line, `'${pa.name}' is not a function block instance, so it can't be called`);
+    const T = pa.t.name, def = FB_TYPES[T], get = pa.get, sets = [], outs = [];
     this.expOp('(');
     if (!this.isOp(')')) {
       do {
         const pn = this.expId(), P = pn.v.toUpperCase();
         if (this.accOp(':=')) {
-          if (!(P in def.in)) throw new PlcError(pn.line, `${tag.type} has no input '${pn.v}'. Inputs: ${Object.keys(def.in).join(', ')}`);
-          const e = this.expr(), ty = ELEM[def.in[P]], f = e.f;
-          sets.push(() => { st[P] = coerce(ty, f()); });
+          if (!(P in def.in)) throw new PlcError(pn.line, `${T} has no input '${pn.v}'. Inputs: ${Object.keys(def.in).join(', ')}`);
+          const e = this.elem(this.expr(), pn.line), ty = ELEM[def.in[P]], f = e.f;
+          sets.push(st => { st[P] = coerce(ty, f()); });
         } else if (this.accOp('=>')) {
-          if (!(P in def.out)) throw new PlcError(pn.line, `${tag.type} has no output '${pn.v}'. Outputs: ${Object.keys(def.out).join(', ')}`);
-          const lv = this.lvalue();
-          outs.push(lv.assign({ f: () => st[P] }));
+          if (!(P in def.out)) throw new PlcError(pn.line, `${T} has no output '${pn.v}'. Outputs: ${Object.keys(def.out).join(', ')}`);
+          const tgt = this.expId();
+          const lp = this.path(tgt);
+          const ty = ET[def.out[P]] || elemT(ELEM[def.out[P]]);
+          let cur;
+          const asg = this.assign(lp, { ty: ty.b, t: ty, f: () => cur[P] });
+          outs.push(st => { cur = st; asg(); });
         } else this.fail(`Expected ':=' after parameter '${pn.v}'`);
       } while (this.accOp(','));
     }
@@ -323,20 +494,21 @@ class Parser {
     this.expOp(';', ' at end of statement');
     const run = def.run;
     return () => {
-      for (let i = 0; i < sets.length; i++) sets[i]();
+      const st = get();
+      for (let i = 0; i < sets.length; i++) sets[i](st);
       run(st, RT.dt);
-      for (let i = 0; i < outs.length; i++) outs[i]();
+      for (let i = 0; i < outs.length; i++) outs[i](st);
     };
   }
 
   ifStmt() {
     this.expKw('IF');
     const branches = [];
-    let c = this.expr(); this.expKw('THEN');
+    let c = this.elem(this.expr()); this.expKw('THEN');
     branches.push([c.f, this.block(['ELSIF', 'ELSE', 'END_IF'])]);
     let els = null;
     for (;;) {
-      if (this.accKw('ELSIF')) { c = this.expr(); this.expKw('THEN'); branches.push([c.f, this.block(['ELSIF', 'ELSE', 'END_IF'])]); }
+      if (this.accKw('ELSIF')) { c = this.elem(this.expr()); this.expKw('THEN'); branches.push([c.f, this.block(['ELSIF', 'ELSE', 'END_IF'])]); }
       else if (this.accKw('ELSE')) { els = this.block(['END_IF']); }
       else { this.expKw('END_IF'); break; }
     }
@@ -362,7 +534,7 @@ class Parser {
   }
   caseStmt() {
     this.expKw('CASE');
-    const sel = this.expr(); this.expKw('OF');
+    const sel = this.elem(this.expr()); this.expKw('OF');
     const arms = []; let els = null;
     for (;;) {
       if (this.accKw('ELSE')) { els = this.block(['END_CASE']); this.expKw('END_CASE'); break; }
@@ -389,12 +561,12 @@ class Parser {
   forStmt() {
     this.expKw('FOR');
     const id = this.expId(), tag = this.ref(id);
-    if (tag.kind !== 'MEM') throw new PlcError(id.line, 'FOR loop variable must be a declared INT variable');
+    if (tag.kind !== 'MEM' || !tag.base || tag.base === 'BOOL') throw new PlcError(id.line, 'FOR loop variable must be a declared INT/DINT variable');
     this.expOp(':=');
-    const a = this.expr(); this.expKw('TO');
-    const b = this.expr();
+    const a = this.elem(this.expr()); this.expKw('TO');
+    const b = this.elem(this.expr());
     let st = { f: () => 1 };
-    if (this.accKw('BY')) st = this.expr();
+    if (this.accKw('BY')) st = this.elem(this.expr());
     this.expKw('DO');
     const body = this.block(['END_FOR']); this.expKw('END_FOR'); this.accOp(';');
     const line = id.line;
@@ -416,7 +588,7 @@ class Parser {
   whileStmt() {
     const line = this.peek().line;
     this.expKw('WHILE');
-    const c = this.expr(); this.expKw('DO');
+    const c = this.elem(this.expr()); this.expKw('DO');
     const body = this.block(['END_WHILE']); this.expKw('END_WHILE'); this.accOp(';');
     const f = c.f;
     return () => {
@@ -431,7 +603,7 @@ class Parser {
     const line = this.peek().line;
     this.expKw('REPEAT');
     const body = this.block(['UNTIL']); this.expKw('UNTIL');
-    const c = this.expr(); this.expKw('END_REPEAT'); this.accOp(';');
+    const c = this.elem(this.expr()); this.expKw('END_REPEAT'); this.accOp(';');
     const f = c.f;
     return () => {
       let n = 0;
@@ -441,7 +613,7 @@ class Parser {
     };
   }
 
-  // ---- expressions ----
+  // ---------- expressions ----------
   expr() { return this.orE(); }
   bin(next, ops, mk) {
     let l = next.call(this);
@@ -450,12 +622,25 @@ class Parser {
       if (!((p.t === 'op' || p.t === 'kw') && ops.includes(p.v))) return l;
       this.i++;
       const r = next.call(this);
+      this.elem(l, p.line); this.elem(r, p.line);
       l = mk(p.v, l, r, p.line);
     }
   }
-  orE() { return this.bin(this.xorE, ['OR'], (o, a, b) => { const f = a.f, g = b.f; return { ty: 'BOOL', f: () => truthy(f()) || truthy(g()) }; }); }
-  xorE() { return this.bin(this.andE, ['XOR'], (o, a, b) => { const f = a.f, g = b.f; return { ty: 'BOOL', f: () => truthy(f()) !== truthy(g()) }; }); }
-  andE() { return this.bin(this.eqE, ['AND', '&'], (o, a, b) => { const f = a.f, g = b.f; return { ty: 'BOOL', f: () => truthy(f()) && truthy(g()) }; }); }
+  // AND/OR/XOR: logical on BOOL, bitwise on integers
+  logic(op, a, b) {
+    const f = a.f, g = b.f;
+    if (a.ty === 'INT' && b.ty === 'INT') {
+      if (op === 'OR') return { ty: 'INT', f: () => num(f()) | num(g()) };
+      if (op === 'XOR') return { ty: 'INT', f: () => num(f()) ^ num(g()) };
+      return { ty: 'INT', f: () => num(f()) & num(g()) };
+    }
+    if (op === 'OR') return { ty: 'BOOL', f: () => truthy(f()) || truthy(g()) };
+    if (op === 'XOR') return { ty: 'BOOL', f: () => truthy(f()) !== truthy(g()) };
+    return { ty: 'BOOL', f: () => truthy(f()) && truthy(g()) };
+  }
+  orE() { return this.bin(this.xorE, ['OR'], (o, a, b) => this.logic('OR', a, b)); }
+  xorE() { return this.bin(this.andE, ['XOR'], (o, a, b) => this.logic('XOR', a, b)); }
+  andE() { return this.bin(this.eqE, ['AND', '&'], (o, a, b) => this.logic('AND', a, b)); }
   eqE() {
     return this.bin(this.relE, ['=', '<>'], (o, a, b) => {
       const f = a.f, g = b.f;
@@ -490,8 +675,12 @@ class Parser {
   }
   unary() {
     const p = this.peek();
-    if (p.t === 'kw' && p.v === 'NOT') { this.i++; const a = this.unary(), f = a.f; return { ty: 'BOOL', f: () => !truthy(f()) }; }
-    if (p.t === 'op' && p.v === '-') { this.i++; const a = this.unary(), f = a.f; return { ty: a.ty === 'BOOL' ? 'INT' : a.ty, f: () => -num(f()) }; }
+    if (p.t === 'kw' && p.v === 'NOT') {
+      this.i++; const a = this.elem(this.unary(), p.line), f = a.f;
+      if (a.ty === 'INT') return { ty: 'INT', f: () => ~num(f()) };
+      return { ty: 'BOOL', f: () => !truthy(f()) };
+    }
+    if (p.t === 'op' && p.v === '-') { this.i++; const a = this.elem(this.unary(), p.line), f = a.f; return { ty: a.ty === 'BOOL' ? 'INT' : a.ty, f: () => -num(f()) }; }
     if (p.t === 'op' && p.v === '+') { this.i++; return this.unary(); }
     return this.primary();
   }
@@ -501,38 +690,66 @@ class Parser {
     if (p.t === 'kw' && (p.v === 'TRUE' || p.v === 'FALSE')) { const v = p.v === 'TRUE'; return { ty: 'BOOL', f: () => v }; }
     if (p.t === 'op' && p.v === '(') { const e = this.expr(); this.expOp(')'); return e; }
     if (p.t === 'id') {
-      if (this.isOp('(')) return this.funcCall(p);
-      const tag = this.ref(p);
-      if (this.accOp('.')) {
-        const m = this.expId();
-        if (tag.kind !== 'FB') throw new PlcError(m.line, `'${p.v}' is not a function block, so it has no members`);
-        const M = m.v.toUpperCase(), def = FB_TYPES[tag.type];
-        const ty = def.in[M] || def.out[M];
-        if (!ty) throw new PlcError(m.line, `${tag.type} has no member '${m.v}'. Members: ${[...Object.keys(def.in), ...Object.keys(def.out)].join(', ')}`);
-        const st = tag.fb;
-        return { ty: ELEM[ty], f: () => st[M] };
+      if (this.isOp('(') && !this.tags[p.v.toUpperCase()]) return this.funcCall(p);
+      const pa = this.path(p);
+      if (this.isOp('(')) throw new PlcError(p.line, `Function block calls must be a statement on their own: ${pa.name}(...);`);
+      if (pa.t.k === 'e') return { ty: pa.t.b, t: pa.t, f: pa.get };
+      if (pa.t.k === 'f') {
+        const o = Object.keys(FB_TYPES[pa.t.name].out)[0];
+        throw new PlcError(p.line, `'${pa.name}' is a ${pa.t.name}; read one of its outputs, e.g. ${pa.name}.${o}`);
       }
-      if (tag.kind === 'FB') {
-        const o = Object.keys(FB_TYPES[tag.type].out)[0];
-        throw new PlcError(p.line, `'${p.v}' is a ${tag.type}; read one of its outputs, e.g. ${p.v}.${o}`);
-      }
-      return { ty: tag.base, f: () => tag.v };
+      return { ty: 'ANY', t: pa.t, f: pa.get, path: pa };
     }
     this.i--;
     this.fail('Expected a value or expression');
   }
   funcCall(id) {
     const N = id.v.toUpperCase();
-    if (this.tags[N] && this.tags[N].kind === 'FB') throw new PlcError(id.line, `Function block calls must be a statement on their own: ${id.v}(...);`);
     this.expOp('(');
     const args = [];
     if (!this.isOp(')')) { do { args.push(this.expr()); } while (this.accOp(',')); }
     this.expOp(')');
-    const fs = args.map(a => a.f);
     const need = n => { if (args.length !== n) throw new PlcError(id.line, `${id.v} expects ${n} argument(s), got ${args.length}`); };
+    // ---- array / structure built-ins ----
+    if (N === 'BSL' || N === 'BSR') {
+      need(2);
+      const arr = args[0];
+      if (!arr.t || arr.t.k !== 'a') throw new PlcError(id.line, `${N}: the first argument must be an ARRAY (e.g. ${N}(Track, NewBit))`);
+      const et = arr.t.of, inp = args[1];
+      let getIn;
+      if (et.k === 'e') { this.elem(inp, id.line); const f = inp.f, b = et.b; getIn = () => coerce(b, f()); }
+      else {
+        if (!inp.t || !sameType(et, inp.t)) throw new PlcError(id.line, `${N}: the value shifted in must be a ${et.name}`);
+        const f = inp.f; getIn = () => clone(et, f());
+      }
+      const ga = arr.f, left = N === 'BSL';
+      return { ty: et.k === 'e' ? et.b : 'ANY', t: et, f: () => {
+        const a = ga(), v = getIn(), n = a.length;
+        let out;
+        if (left) { out = a[n - 1]; for (let i = n - 1; i > 0; i--) a[i] = a[i - 1]; a[0] = v; }
+        else { out = a[0]; for (let i = 0; i < n - 1; i++) a[i] = a[i + 1]; a[n - 1] = v; }
+        return out;
+      } };
+    }
+    if (N === 'LOWER_BOUND' || N === 'UPPER_BOUND') {
+      if (args.length < 1 || !args[0].t || args[0].t.k !== 'a') throw new PlcError(id.line, `${N}(array, 1) needs an ARRAY`);
+      const v = N === 'LOWER_BOUND' ? args[0].t.lo : args[0].t.hi; return { ty: 'INT', f: () => v };
+    }
+    if (N === 'FB_RESET') {
+      need(1);
+      const a = args[0];
+      const pa = a.path;
+      if (!pa) {
+        // FB instances are rejected by primary(); re-parse isn't possible, so FB_RESET takes the instance via a path marker
+        throw new PlcError(id.line, 'FB_RESET needs a function block instance, e.g. FB_RESET(MyTimer)');
+      }
+      throw new PlcError(id.line, 'FB_RESET needs a function block instance');
+    }
+    const fs = args.map(a => this.elem(a, id.line).f);
     const m = /^[A-Z]+_TO_([A-Z]+)$/.exec(N);
     if (m && ELEM[m[1]]) { need(1); const b = ELEM[m[1]], f = fs[0]; return { ty: b, f: () => coerce(b, f()) }; }
     const real1 = fn => { need(1); const f = fs[0]; return { ty: 'REAL', f: () => fn(num(f())) }; };
+    const sh = fn => { need(2); const [a, b] = fs; return { ty: 'INT', f: () => fn(num(a()) | 0, Math.max(0, Math.min(31, num(b()) | 0))) }; };
     switch (N) {
       case 'ABS': { need(1); const f = fs[0]; return { ty: args[0].ty, f: () => Math.abs(num(f())) }; }
       case 'SQRT': return real1(Math.sqrt);
@@ -541,6 +758,10 @@ class Parser {
       case 'EXP': return real1(Math.exp);
       case 'LN': return real1(Math.log);
       case 'TRUNC': { need(1); const f = fs[0]; return { ty: 'INT', f: () => Math.trunc(num(f())) }; }
+      case 'SHL': return sh((x, n) => (x << n) | 0);
+      case 'SHR': return sh((x, n) => (x >>> n) | 0);
+      case 'ROL': return sh((x, n) => ((x << n) | (x >>> (32 - n))) | 0);
+      case 'ROR': return sh((x, n) => ((x >>> n) | (x << (32 - n))) | 0);
       case 'MIN': case 'MAX': {
         if (args.length < 2) throw new PlcError(id.line, `${id.v} needs at least 2 arguments`);
         const ty = args.reduce((t, a) => arithTy(t, a.ty), 'INT'), fn = N === 'MIN' ? Math.min : Math.max;
@@ -553,11 +774,41 @@ class Parser {
   }
 }
 
-/** Compile ST source. `tags` is mutated: declared variables are added to it. */
-function compile(src, tags) {
-  const p = new Parser(tokenize(src), tags);
-  const fn = p.program();
-  return { fn, declared: p.declared };
-}
+// FB_RESET(instance) is handled before expression parsing, because FB instances are not values.
+const _stmt = Parser.prototype.stmt;
+Parser.prototype.stmt = function () {
+  const p = this.peek();
+  if (p.t === 'id' && p.v.toUpperCase() === 'FB_RESET' && this.peek(1).t === 'op' && this.peek(1).v === '(') {
+    this.i += 2;
+    const id = this.expId();
+    const pa = this.path(id);
+    if (pa.t.k !== 'f') throw new PlcError(id.line, `FB_RESET needs a function block instance; '${pa.name}' is ${pa.t.name}`);
+    this.expOp(')'); this.expOp(';', ' at end of statement');
+    const g = pa.get, T = pa.t.name;
+    return () => { fbReset(g(), T); };
+  }
+  return _stmt.call(this);
+};
 
-module.exports = { compile, PlcError, RtError, FB_TYPES, ELEM, RT, truthy, num, coerce, defVal, newFb };
+/**
+ * Compile a project: an ordered list of units [{name, src}] sharing one tag table and type registry.
+ * Returns { fn, declared, types }. Throws PlcError with .unit set.
+ */
+function compileUnits(units, tags) {
+  const ctx = { tags, types: {}, declared: [] };
+  const fns = [];
+  for (const u of units) {
+    try {
+      const p = new Parser(tokenize(u.src || ''), ctx);
+      fns.push(p.unit());
+    } catch (e) {
+      if (e instanceof PlcError) e.unit = u.name;
+      throw e;
+    }
+  }
+  const fn = () => { for (let i = 0; i < fns.length; i++) fns[i](); };
+  return { fn, declared: ctx.declared, types: ctx.types };
+}
+function compile(src, tags) { return compileUnits([{ name: 'Main', src }], tags); }
+
+module.exports = { compile, compileUnits, PlcError, RtError, FB_TYPES, ELEM, ET, RT, truthy, num, coerce, defVal, newFb, makeVal, tagType, clone };

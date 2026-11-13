@@ -4,6 +4,7 @@
  * forces, alarms, events and trend history. One instance runs in the server.
  */
 const C = require('./compiler');
+const LD = require('./ladder');
 const { truthy, num, coerce, defVal, ELEM } = C;
 
 const PANEL_SIGNALS = {
@@ -33,7 +34,8 @@ class Runtime {
     this.tags = {};
     this.io = {};
     this.program = null;
-    this.loadedSrc = '';
+    this.loaded = '';
+    this.leaves = []; this.leafMap = {}; this.fbs = []; this.fbMap = {};
     this.forces = {};
     this.panel = { pb_start: false, pb_stop: false, estop: false };
     this.alm = {};
@@ -60,7 +62,8 @@ class Runtime {
     this.alm = {}; this.sensorRt = {};
     this.hist = { t: [], v: {} };
     this.buildIo();
-    const r = this.download(project.src || '', false);
+    normalizeProject(project);
+    const r = this.download(unitsOf(project), false);
     this.log('SYS', `Loaded scenario: ${def.name}${r.ok ? '' : ' (program has errors — fix and download)'}`);
     this.projVer++;
     return r;
@@ -110,7 +113,7 @@ class Runtime {
     this.project.sensors = sensors;
     this.sensorRt = {};
     this.buildIo();
-    const r = this.download(this.project.src, true);
+    const r = this.download(unitsOf(this.project), true);
     this.log('SYS', 'I/O configuration changed' + (r.ok ? '' : ' — program no longer compiles, PLC stopped'));
     if (!r.ok && this.plc === 'RUN') this.setMode('STOP');
     this.projVer++;
@@ -118,30 +121,86 @@ class Runtime {
   }
 
   // ---------- program ----------
-  download(src, warm = true) {
+  /** units = { types, globals, pous:[{id,name,lang,src|rungs}] } */
+  download(units, warm = true, dry = false) {
+    units = canonUnits(units);
     const tags = {};
     for (const k in this.io) tags[k] = this.io[k];
+    const st = [{ name: 'Data types', kind: 'types', src: units.types || '' }, { name: 'Globals', kind: 'globals', src: units.globals || '' }];
+    const maps = {};
+    let cur = null;
+    try {
+      (units.pous || []).forEach((p, i) => {
+        cur = p.name;
+        if (p.lang === 'LD') { const g = LD.toST(p, i + 1); maps[p.name] = g.map; st.push({ name: p.name, id: p.id, lang: 'LD', src: g.src }); }
+        else st.push({ name: p.name, id: p.id, lang: 'ST', src: p.src || '' });
+      });
+    } catch (e) {
+      if (e instanceof LD.LdError) return { ok: false, unit: cur, rung: e.rung, line: 0, msg: `Rung ${e.rung}: ${e.message}` };
+      throw e;
+    }
+    const names = new Set();
+    for (const p of units.pous || []) {
+      if (!/^[A-Za-z_][A-Za-z0-9_ ]{0,31}$/.test(p.name || '')) return { ok: false, unit: p.name, line: 0, msg: `Program name '${p.name}' must start with a letter (letters, digits, spaces, _)` };
+      if (names.has(p.name.toUpperCase())) return { ok: false, unit: p.name, line: 0, msg: `Two programs are called '${p.name}'` };
+      names.add(p.name.toUpperCase());
+    }
     let res;
-    try { res = C.compile(src, tags); }
+    try { res = C.compileUnits(st, tags); }
     catch (e) {
-      if (e instanceof C.PlcError) return { ok: false, line: e.line, msg: e.message };
+      if (e instanceof C.PlcError) {
+        const m = maps[e.unit];
+        if (m) { const rung = m[(e.line || 1) - 1] || 0; return { ok: false, unit: e.unit, rung, line: 0, msg: (rung ? `Rung ${rung}: ` : '') + e.message.replace(/_L\d+_/g, '') }; }
+        return { ok: false, unit: e.unit, line: e.line, msg: e.message };
+      }
       return { ok: false, line: 0, msg: String(e.message || e) };
     }
+    if (dry) return { ok: true, vars: res.declared.length };
     if (warm) {
       for (const K of res.declared) {
         const n = tags[K], o = this.tags[K];
-        if (!o) continue;
-        if (n.kind === 'MEM' && o.kind === 'MEM' && n.base === o.base) n.v = o.v;
-        else if (n.kind === 'FB' && o.kind === 'FB' && n.type === o.type) Object.assign(n.fb, o.fb);
+        if (!o || o.kind === 'DI' || o.kind === 'AI') continue;
+        if (n.kind === 'FB' && o.kind === 'FB' && n.type === o.type) Object.assign(n.fb, o.fb);
+        else if (n.kind === 'MEM' && o.kind === 'MEM') n.v = merge(n.t, n.v, o.v);
       }
     }
-    for (const k in this.forces) if (!tags[k] || tags[k].kind === 'FB') delete this.forces[k];
     this.tags = tags;
+    this.types = res.types;
     this.program = res.fn;
-    this.loadedSrc = src;
-    this.project.src = src;
+    this.buildLeaves();
+    for (const k in this.forces) if (!this.leafMap[k]) delete this.forces[k];
+    this.loaded = JSON.stringify(units);
+    Object.assign(this.project, { types: units.types || '', globals: units.globals || '', pous: units.pous || [] });
+    delete this.project.src;
     this.tagVer++;
     return { ok: true, vars: res.declared.length };
+  }
+
+  // Flatten every variable into elementary "leaves" (Motor1.Run, Track[2].Bad …) for tags/HMI/alarms/trend/Modbus
+  buildLeaves() {
+    const leaves = [], fbs = [], map = {}, fbMap = {};
+    const LIMIT = 6000;
+    const walk = (t, name, key, get, set, kind, desc, top) => {
+      if (leaves.length >= LIMIT) return;
+      if (t.k === 'e') {
+        const leaf = { key, name, type: t.name, base: t.b, kind, desc, get, set, top };
+        leaves.push(leaf); map[key] = leaf;
+      } else if (t.k === 's') {
+        for (const f of t.fields) walk(f.t, `${name}.${f.name}`, `${key}.${f.N}`, () => get()[f.N], v => { get()[f.N] = v; }, kind, '', top);
+      } else if (t.k === 'a') {
+        for (let i = t.lo; i <= t.hi; i++) { const j = i - t.lo; walk(t.of, `${name}[${i}]`, `${key}[${i}]`, () => get()[j], v => { get()[j] = v; }, kind, '', top); }
+      } else if (t.k === 'f') {
+        const fb = { key, name, type: t.name, kind: 'FB', desc: C.FB_TYPES[t.name].desc, get, top };
+        fbs.push(fb); fbMap[key] = fb;
+      }
+    };
+    for (const K in this.tags) {
+      const tag = this.tags[K];
+      if (/^_L\d+_/.test(K)) continue;       // ladder internals
+      const t = C.tagType(tag);
+      walk(t, tag.name, K, tag.kind === 'FB' ? () => tag.fb : () => tag.v, v => { tag.v = v; }, tag.kind === 'FB' ? 'MEM' : tag.kind, tag.desc || '', K);
+    }
+    this.leaves = leaves; this.leafMap = map; this.fbs = fbs; this.fbMap = fbMap;
   }
 
   setMode(m) {
@@ -217,7 +276,7 @@ class Runtime {
   }
 
   applyForces() {
-    for (const K in this.forces) { const t = this.tags[K]; if (t) t.v = coerce(t.base, this.forces[K]); }
+    for (const K in this.forces) { const l = this.leafMap[K]; if (l) l.set(coerce(l.base, this.forces[K])); }
   }
 
   outputs() {
@@ -262,41 +321,52 @@ class Runtime {
   // ---------- tags ----------
   write(name, value) {
     const parse = v => (typeof v === 'string' ? (v === 'true' ? true : v === 'false' ? false : parseFloat(v)) : v);
-    if (String(name).includes('.')) {          // function block input, e.g. TempPID.KP
-      const [fbName, mem] = String(name).toUpperCase().split('.');
-      const t = this.tags[fbName];
-      if (!t || t.kind !== 'FB') return false;
-      const ty = C.FB_TYPES[t.type].in[mem];
-      if (!ty) return false;
-      t.fb[mem] = coerce(ELEM[ty], parse(value));
+    const K = normKey(name);
+    const l = this.leafMap[K];
+    if (l) {
+      if (l.kind === 'SYS') return false;
+      const v = coerce(l.base, parse(value));
+      if (K in this.forces) this.forces[K] = v;
+      l.set(v);
       return true;
     }
-    const K = String(name).toUpperCase(), t = this.tags[K];
-    if (!t || t.kind === 'FB' || t.kind === 'SYS') return false;
-    const v = coerce(t.base, typeof value === 'string' ? (value === 'true' ? true : value === 'false' ? false : parseFloat(value)) : value);
-    if (K in this.forces) this.forces[K] = v;
-    t.v = v;
-    return true;
+    const dot = K.lastIndexOf('.');                 // function block input, e.g. TempPID.KP or Loop[1].Pid.KP
+    if (dot > 0) {
+      const fb = this.fbMap[K.slice(0, dot)], mem = K.slice(dot + 1);
+      if (!fb) return false;
+      const ty = C.FB_TYPES[fb.type].in[mem];
+      if (!ty) return false;
+      fb.get()[mem] = coerce(ELEM[ty], parse(value));
+      return true;
+    }
+    return false;
   }
   force(name, value) {
-    const K = String(name).toUpperCase(), t = this.tags[K];
-    if (!t || t.kind === 'FB') return false;
-    if (value === null || value === undefined) { delete this.forces[K]; this.log('FORCE', `Force removed: ${t.name}`); }
-    else { this.forces[K] = coerce(t.base, value); t.v = this.forces[K]; this.log('FORCE', `Forced ${t.name} = ${this.forces[K]}`); }
+    const K = normKey(name), l = this.leafMap[K];
+    if (!l) return false;
+    if (value === null || value === undefined) { delete this.forces[K]; this.log('FORCE', `Force removed: ${l.name}`); }
+    else { this.forces[K] = coerce(l.base, value); l.set(this.forces[K]); this.log('FORCE', `Forced ${l.name} = ${this.forces[K]}`); }
     return true;
+  }
+  leafValue(name) {
+    const K = normKey(name), l = this.leafMap[K];
+    if (l) return l.get();
+    const dot = K.lastIndexOf('.');
+    if (dot > 0) { const fb = this.fbMap[K.slice(0, dot)]; if (fb) return fb.get()[K.slice(dot + 1)]; }
+    return undefined;
   }
 
   // ---------- alarms ----------
   evalAlarms() {
     const now = Date.now();
     for (const a of this.project.alarms) {
-      const t = this.tags[(a.tag || '').toUpperCase()];
+      const tv = this.leafValue(a.tag || '');
       let act = false;
-      if (t && t.kind !== 'FB') {
-        const v = num(t.v), x = parseFloat(a.val);
+      if (tv !== undefined && typeof tv !== 'object') {
+        const v = num(tv), x = parseFloat(a.val);
         switch (a.cond) {
-          case 'TRUE': act = truthy(t.v); break;
-          case 'FALSE': act = !truthy(t.v); break;
+          case 'TRUE': act = truthy(tv); break;
+          case 'FALSE': act = !truthy(tv); break;
           case '>': act = v > x; break;
           case '<': act = v < x; break;
           case '>=': act = v >= x; break;
@@ -340,32 +410,31 @@ class Runtime {
     const h = this.hist;
     h.t.push(Date.now());
     if (h.t.length > HIST_MAX) h.t.shift();
-    for (const K in this.tags) {
-      const t = this.tags[K];
-      if (t.kind === 'FB') continue;
-      let a = h.v[K];
-      if (!a) a = h.v[K] = [];
-      a.push(num(t.v));
+    const n = Math.min(this.leaves.length, 800);
+    for (let i = 0; i < n; i++) {
+      const l = this.leaves[i];
+      let a = h.v[l.key];
+      if (!a) a = h.v[l.key] = [];
+      a.push(num(l.get()));
       if (a.length > HIST_MAX) a.shift();
     }
-    for (const K in h.v) if (!this.tags[K]) delete h.v[K];
+    for (const K in h.v) if (!this.leafMap[K]) delete h.v[K];
   }
 
   // ---------- snapshots ----------
   tagValues() {
     const v = {}, fb = {};
-    for (const K in this.tags) {
-      const t = this.tags[K];
-      if (t.kind === 'FB') { const o = {}; for (const m in t.fb) if (m[0] !== '_') o[m] = t.fb[m]; fb[K] = o; }
-      else v[K] = t.v;
-    }
+    for (const l of this.leaves) v[l.key] = l.get();
+    for (const f of this.fbs) { const st = f.get(), o = {}; for (const m in st) if (m[0] !== '_') o[m] = st[m]; fb[f.key] = o; }
     return { v, fb };
   }
   tagMeta() {
-    return Object.keys(this.tags).map(K => {
-      const t = this.tags[K];
-      return { key: K, name: t.name, type: t.type, kind: t.kind, desc: t.desc || '', sensor: t.sensor || null };
-    });
+    const out = this.leaves.map(l => ({ key: l.key, name: l.name, type: l.type, kind: l.kind, desc: l.desc || '', top: l.top, sensor: (this.tags[l.top] || {}).sensor || null }));
+    for (const f of this.fbs) out.push({ key: f.key, name: f.name, type: f.type, kind: 'FB', desc: f.desc || '', top: f.top });
+    return out;
+  }
+  typeList() {
+    return Object.values(this.types || {}).map(t => ({ name: t.name, kind: t.k, fields: t.k === 's' ? t.fields.map(f => ({ name: f.name, type: f.t.name })) : null, of: t.k === 'a' ? t.name : null }));
   }
   snapshot() {
     const tv = this.tagValues();
@@ -379,4 +448,41 @@ class Runtime {
   }
 }
 
-module.exports = { Runtime, PANEL_SIGNALS, ANALOG_FAULTS, DISCRETE_FAULTS, ACT_FAULTS };
+function normKey(name) { return String(name).replace(/\s+/g, '').toUpperCase(); }
+function merge(t, nv, ov) {
+  if (ov === undefined || ov === null) return nv;
+  if (t.k === 'e') return typeof ov === 'object' ? nv : C.coerce(t.b, ov);
+  if (t.k === 's') { if (typeof ov !== 'object') return nv; for (const f of t.fields) if (f.N in ov) nv[f.N] = merge(f.t, nv[f.N], ov[f.N]); return nv; }
+  if (t.k === 'a') { if (!Array.isArray(ov)) return nv; for (let i = 0; i < nv.length && i < ov.length; i++) nv[i] = merge(t.of, nv[i], ov[i]); return nv; }
+  if (t.k === 'f') { if (typeof ov === 'object') Object.assign(nv, ov); return nv; }
+  return nv;
+}
+/** Bring old single-program projects up to the multi-unit format. */
+function normalizeProject(p) {
+  if (!Array.isArray(p.pous)) {
+    p.pous = [{ id: 'main', name: 'Main', lang: 'ST', src: p.src || '' }];
+    delete p.src;
+  }
+  if (typeof p.types !== 'string') p.types = '';
+  if (typeof p.globals !== 'string') p.globals = '';
+  p.pous.forEach((q, i) => { if (!q.id) q.id = 'p' + i + Math.random().toString(36).slice(2, 6); if (!q.lang) q.lang = 'ST'; });
+  return p;
+}
+/** Canonical shape (also mirrored in the client) so "matches the PLC" comparisons are exact. */
+function canonUnits(b) {
+  const str = (v, max) => String(v == null ? '' : v).slice(0, max);
+  const pous = (Array.isArray(b.pous) ? b.pous : []).slice(0, 32).map((p, i) => {
+    const o = { id: str(p.id || 'p' + i, 40), name: str(p.name || 'Program' + (i + 1), 32).trim(), lang: p.lang === 'LD' ? 'LD' : 'ST' };
+    if (o.lang === 'LD') o.rungs = (Array.isArray(p.rungs) ? p.rungs : []).slice(0, 500).map(r => ({
+      comment: str(r.comment, 300),
+      rows: (Array.isArray(r.rows) ? r.rows : []).slice(0, 12).map(row => (Array.isArray(row) ? row : []).slice(0, 16).map(el => ({ t: str(el.t, 8), a: str(el.a, 120), b: str(el.b, 120), op: str(el.op, 3) }))),
+      outs: (Array.isArray(r.outs) ? r.outs : []).slice(0, 12).map(el => ({ t: str(el.t, 8), a: str(el.a, 200), b: str(el.b, 120), c: str(el.c, 120) })),
+    }));
+    else o.src = str(p.src, 400000);
+    return o;
+  });
+  return { types: str(b.types, 200000), globals: str(b.globals, 200000), pous };
+}
+function unitsOf(p) { return { types: p.types, globals: p.globals, pous: p.pous }; }
+
+module.exports = { normalizeProject, unitsOf, canonUnits, Runtime, PANEL_SIGNALS, ANALOG_FAULTS, DISCRETE_FAULTS, ACT_FAULTS };

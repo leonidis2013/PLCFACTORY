@@ -37,8 +37,11 @@ const App = {
   val(name) {
     if (!S.snap || !name) return undefined;
     const N = String(name).toUpperCase();
-    if (N.includes('.')) { const [a, b] = N.split('.'); return S.snap.fb[a] ? S.snap.fb[a][b] : undefined; }
-    return S.snap.tags[N];
+    const N2 = N.replace(/\s+/g, '');
+    if (N2 in S.snap.tags) return S.snap.tags[N2];
+    const d = N2.lastIndexOf('.');
+    if (d > 0) { const fb = S.snap.fb[N2.slice(0, d)]; return fb ? fb[N2.slice(d + 1)] : undefined; }
+    return undefined;
   },
   has(name) { const v = App.val(name); return v !== undefined; },
   isFb(name) { return S.snap && S.snap.fb[String(name).toUpperCase()] !== undefined; },
@@ -75,7 +78,7 @@ function setTab(t) {
   if (t === 'io') renderIo();
   if (t === 'trend') renderPens();
   if (t === 'learn') $('#learn').innerHTML = LEARN.html(S.info, S.meta);
-  if (t === 'program') renderGutter();
+  if (t === 'program') renderProgram();
 }
 $$('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
 
@@ -217,8 +220,99 @@ function modal(html) { $('#mbody').innerHTML = html; $('#modal').hidden = false;
 function closeModal() { if ($('#modal').dataset.locked === '1') return; $('#modal').hidden = true; }
 $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
 
-// ---------- program editor ----------
+// ---------- program: project tree (data types, globals, programs in ST or LD) ----------
 const code = $('#code');
+S.units = null; S.cur = 'main';
+const TEMPLATES = {
+  ST: '(* New program — runs every scan, in the order shown above *)\nVAR\n  (* local variables *)\nEND_VAR\n\n',
+  types: '(* User-defined data types *)\nTYPE\n  Motor : STRUCT\n    Run, Fault : BOOL;\n    Speed : REAL;\n  END_STRUCT;\nEND_TYPE\n',
+  globals: '(* Global variables, visible to every program *)\nVAR_GLOBAL\nEND_VAR\n',
+};
+function canonUnits(b) {           // mirrors server/engine/runtime.js canonUnits
+  const str = (v, max) => String(v == null ? '' : v).slice(0, max);
+  const pous = (Array.isArray(b.pous) ? b.pous : []).slice(0, 32).map((p, i) => {
+    const o = { id: str(p.id || 'p' + i, 40), name: str(p.name || 'Program' + (i + 1), 32).trim(), lang: p.lang === 'LD' ? 'LD' : 'ST' };
+    if (o.lang === 'LD') o.rungs = (Array.isArray(p.rungs) ? p.rungs : []).slice(0, 500).map(r => ({
+      comment: str(r.comment, 300),
+      rows: (Array.isArray(r.rows) ? r.rows : []).slice(0, 12).map(row => (Array.isArray(row) ? row : []).slice(0, 16).map(el => ({ t: str(el.t, 8), a: str(el.a, 120), b: str(el.b, 120), op: str(el.op, 3) }))),
+      outs: (Array.isArray(r.outs) ? r.outs : []).slice(0, 12).map(el => ({ t: str(el.t, 8), a: str(el.a, 200), b: str(el.b, 120), c: str(el.c, 120) })),
+    }));
+    else o.src = str(p.src, 400000);
+    return o;
+  });
+  return { types: str(b.types, 200000), globals: str(b.globals, 200000), pous };
+}
+function unitsFromInfo() {
+  const p = S.info.project, d = p.draft;
+  return canonUnits(d && Array.isArray(d.pous) ? d : { types: p.types, globals: p.globals, pous: p.pous });
+}
+const curPou = () => S.units.pous.find(p => p.id === S.cur);
+const isDirty = () => JSON.stringify(canonUnits(S.units)) !== S.info.loaded;
+function unitText() { if (S.cur === 'types') return S.units.types; if (S.cur === 'globals') return S.units.globals; const p = curPou(); return p ? p.src || '' : ''; }
+function setUnitText(v) { if (S.cur === 'types') S.units.types = v; else if (S.cur === 'globals') S.units.globals = v; else { const p = curPou(); if (p) p.src = v; } }
+function unitIdByName(n) { if (n === 'Data types') return 'types'; if (n === 'Globals') return 'globals'; const p = S.units.pous.find(q => q.name === n); return p ? p.id : null; }
+
+function renderProgram() {
+  if (!S.units) return;
+  if (S.cur !== 'types' && S.cur !== 'globals' && !curPou()) S.cur = S.units.pous[0] ? S.units.pous[0].id : 'globals';
+  const eng = can('engineer');
+  const items = [['types', 'Data types', 'TYPE'], ['globals', 'Globals', 'VAR']].concat(S.units.pous.map((p, i) => [p.id, p.name, p.lang, i + 1]));
+  $('#unitBar').innerHTML = items.map(([id, n, l, ord]) => `<button class="unit ${l}${id === S.cur ? ' on' : ''}" data-u="${esc(id)}">${ord ? `<span class="ord">${ord}</span>` : ''}<i>${l}</i>${esc(n)}</button>`).join('') +
+    (eng ? '<button class="unit add" id="addPou">＋ Program</button>' : '');
+  $$('#unitBar [data-u]').forEach(b => b.onclick = () => { S.cur = b.dataset.u; showErr({ ok: true }); renderProgram(); });
+  if ($('#addPou')) $('#addPou').onclick = addPouDialog;
+  const p = curPou();
+  let head = '';
+  if (S.cur === 'types') head = '<span class="muted small">User-defined types: <code>TYPE Name : STRUCT … END_STRUCT; END_TYPE</code>. Use them in any program, e.g. <code>Track : ARRAY[0..9] OF VialData;</code></span>';
+  else if (S.cur === 'globals') head = '<span class="muted small">Variables declared here (<code>VAR_GLOBAL … END_VAR</code>) are shared by all programs — ladder programs use these.</span>';
+  else if (p) head = `<label class="small muted">Name <input id="pouName" value="${esc(p.name)}" ${eng ? '' : 'disabled'} maxlength="32"></label>
+    <span class="tagk ${p.lang}">${p.lang === 'LD' ? 'Ladder Diagram' : 'Structured Text'}</span>
+    <span class="muted small">Runs ${S.units.pous.indexOf(p) + 1} of ${S.units.pous.length} each scan</span>
+    ${eng ? `<span class="grow"></span><button id="pouUp" title="Run earlier">↑</button><button id="pouDown" title="Run later">↓</button><button id="pouDel" class="danger">Delete</button>` : ''}`;
+  $('#unitHead').innerHTML = head;
+  if ($('#pouName')) $('#pouName').oninput = e => { p.name = e.target.value; edited(false); $$('#unitBar .unit.on')[0].lastChild.textContent = p.name; };
+  if ($('#pouUp')) $('#pouUp').onclick = () => movePou(-1);
+  if ($('#pouDown')) $('#pouDown').onclick = () => movePou(1);
+  if ($('#pouDel')) $('#pouDel').onclick = e => {
+    if (S.units.pous.length <= 1) return toast('A project needs at least one program', true);
+    if (e.target.dataset.sure !== '1') { e.target.dataset.sure = '1'; e.target.textContent = 'Delete program?'; return; }
+    S.units.pous = S.units.pous.filter(x => x !== p); S.cur = S.units.pous[0].id; edited(); renderProgram();
+  };
+  const ld = p && p.lang === 'LD';
+  $('#stEditor').hidden = ld; $('#ldEditor').hidden = !ld;
+  if (ld) LDE.mount($('#ldEditor'), p, { editable: eng, onChange: () => edited(), tagNames: ldTagNames });
+  else { if (code.value !== unitText()) code.value = unitText(); code.readOnly = !eng; renderGutter(S.errLine); }
+  progStatus();
+  renderTypeList();
+}
+function ldTagNames() { return S.info.tags.map(t => t.name); }
+function movePou(d) {
+  const a = S.units.pous, i = a.indexOf(curPou()), j = i + d;
+  if (j < 0 || j >= a.length) return;
+  [a[i], a[j]] = [a[j], a[i]]; edited(); renderProgram();
+}
+function addPouDialog() {
+  modal(`<h3>Add a program</h3><form id="npF" class="menu">
+    <label class="f">Name<input id="npName" maxlength="32" value="Program${S.units.pous.length + 1}" required></label>
+    <label class="f">Language<select id="npLang"><option value="LD">Ladder Diagram (LD)</option><option value="ST">Structured Text (ST)</option></select></label>
+    <p class="role-note">Programs run one after another every scan, in the order shown. Variables used by more than one program belong in <b>Globals</b>.</p>
+    <div class="row" style="justify-content:flex-end"><button type="button" id="npNo">Cancel</button><button class="primary" type="submit">Add</button></div></form>`);
+  $('#npNo').onclick = closeModal;
+  $('#npF').onsubmit = e => {
+    e.preventDefault();
+    const name = $('#npName').value.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_ ]{0,31}$/.test(name)) return toast('Name must start with a letter', true);
+    if (S.units.pous.some(p => p.name.toUpperCase() === name.toUpperCase())) return toast('That name is taken', true);
+    const lang = $('#npLang').value, id = 'p' + Date.now().toString(36);
+    S.units.pous.push(lang === 'LD' ? { id, name, lang, rungs: [{ comment: '', rows: [[{ t: 'NO', a: '' }]], outs: [{ t: 'COIL', a: '' }] }] } : { id, name, lang, src: TEMPLATES.ST });
+    S.cur = id; closeModal(); edited(); renderProgram();
+  };
+}
+function renderTypeList() {
+  const t = S.info.types || [];
+  $('#typeList').innerHTML = t.length ? t.map(x => `<div style="margin:4px 0"><code>${esc(x.name)}</code> ${x.fields ? ': STRUCT ' + x.fields.map(f => `<span class="muted">${esc(f.name)}</span> ${esc(f.type)}`).join(' · ') : esc(x.of || '')}</div>`).join('')
+    : '<span class="muted">No UDTs downloaded yet. Write them in <b>Data types</b>.</span>';
+}
 function renderGutter(errLine) {
   const n = code.value.split('\n').length;
   const g = $('#gutter');
@@ -229,8 +323,9 @@ function renderGutter(errLine) {
   g.scrollTop = code.scrollTop;
 }
 code.addEventListener('scroll', () => { $('#gutter').scrollTop = code.scrollTop; });
-const saveDraft = debounce(() => api('PUT', '/api/source', { src: code.value }), 1200);
-code.addEventListener('input', () => { S.editorDirty = code.value !== S.info.loadedSrc; renderGutter(S.errLine); progStatus(); saveDraft(); });
+const saveDraft = debounce(() => { if (can('engineer')) api('PUT', '/api/source', canonUnits(S.units)); }, 1200);
+function edited(save = true) { S.editorDirty = isDirty(); progStatus(); if (save) saveDraft(); else saveDraft(); }
+code.addEventListener('input', () => { setUnitText(code.value); renderGutter(S.errLine); edited(); });
 code.addEventListener('keydown', e => {
   if (e.key === 'Tab') { e.preventDefault(); code.setRangeText('  ', code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input')); }
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); download(false); }
@@ -242,41 +337,48 @@ function progStatus(msg) {
 }
 function showErr(r) {
   const bar = $('#errBar');
-  if (r.ok) { bar.hidden = true; S.errLine = null; renderGutter(); return; }
-  bar.hidden = false; bar.textContent = `Line ${r.line}: ${r.msg}`; S.errLine = r.line; renderGutter(r.line);
-  bar.onclick = () => gotoLine(r.line);
-  gotoLine(r.line);
+  if (r.ok) { bar.hidden = true; S.errLine = null; renderGutter(); if (S.units && curPou() && curPou().lang === 'LD') LDE.showError(0); return; }
+  const id = r.unit ? unitIdByName(r.unit) : null;
+  if (id && id !== S.cur) { S.cur = id; renderProgram(); }
+  bar.hidden = false; bar.textContent = `${r.unit ? r.unit + ' · ' : ''}${r.rung ? '' : 'Line ' + r.line + ': '}${r.msg}`;
+  if (r.rung) { S.errLine = null; LDE.showError(r.rung); bar.onclick = () => LDE.showError(r.rung); }
+  else { S.errLine = r.line; renderGutter(r.line); bar.onclick = () => gotoLine(r.line); gotoLine(r.line); }
 }
 function gotoLine(n) {
+  if (!n) return;
   const lines = code.value.split('\n'); let pos = 0;
   for (let i = 0; i < n - 1 && i < lines.length; i++) pos += lines[i].length + 1;
   code.focus(); code.setSelectionRange(pos, pos + (lines[n - 1] || '').length);
   code.scrollTop = Math.max(0, (n - 6) * 20);
 }
 async function download(cold) {
-  const r = await api('POST', '/api/download', { src: code.value, cold });
+  const r = await api('POST', '/api/download', Object.assign(canonUnits(S.units), { cold }));
   showErr(r);
   if (r.ok) { toast(cold ? 'Downloaded (cold: memory reset)' : 'Downloaded to PLC'); await refreshProject(); }
   else toast('Compile error — nothing was downloaded', true);
 }
 $('#dlBtn').onclick = () => download(false);
 $('#coldBtn').onclick = () => download(true);
-$('#chkBtn').onclick = async () => { const r = await api('POST', '/api/check', { src: code.value }); showErr(r); toast(r.ok ? `No errors (${r.vars} variables)` : 'Errors found', !r.ok); };
-$('#revertBtn').onclick = () => { code.value = S.info.loadedSrc; S.editorDirty = false; saveDraft(); renderGutter(); progStatus(); showErr({ ok: true }); };
+$('#chkBtn').onclick = async () => { const r = await api('POST', '/api/check', canonUnits(S.units)); showErr(r); toast(r.ok ? `No errors (${r.vars} variables)` : 'Errors found', !r.ok); };
+$('#revertBtn').onclick = () => { S.units = JSON.parse(S.info.loaded); S.editorDirty = false; saveDraft(); showErr({ ok: true }); renderProgram(); };
 $('#exampleBtn').onclick = () => {
-  modal(`<h3>Load the example program?</h3><p class="muted">This replaces the text in the editor (not the PLC until you download).</p>
+  modal(`<h3>Load the example program?</h3><p class="muted">This replaces the data types, globals and all programs with this plant's example, and downloads it.</p>
     <div class="row" style="justify-content:flex-end"><button id="xNo">Cancel</button><button id="xYes" class="primary">Load example</button></div>`);
   $('#xNo').onclick = closeModal;
   $('#xYes').onclick = async () => {
     closeModal();
-    const r = await api('POST', '/api/reset-project', { part: 'src' });
-    await refreshProject(); code.value = S.info.project.src; S.editorDirty = false; renderGutter(); progStatus();
+    await api('POST', '/api/reset-project', { part: 'src' });
+    await refreshProject(true);
   };
 };
 function renderIoChips() {
   const kinds = { DI: 'in', AI: 'in', DO: 'out', AO: 'out', SYS: 'sys' };
   $('#ioList').innerHTML = S.info.tags.filter(t => kinds[t.kind]).map(t => `<span class="chip ${t.kind}" data-n="${esc(t.name)}" title="${esc(t.desc)}">${esc(t.name)}<i>${t.type}</i></span>`).join('');
-  $$('#ioList .chip').forEach(c => c.onclick = () => { code.focus(); code.setRangeText(c.dataset.n, code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input')); });
+  $$('#ioList .chip').forEach(c => c.onclick = () => {
+    if ($('#stEditor').hidden || code.readOnly) { try { navigator.clipboard.writeText(c.dataset.n); toast('Copied ' + c.dataset.n); } catch (e) {} return; }
+    code.focus(); code.setRangeText(c.dataset.n, code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input'));
+  });
+  if (!$('#fbList')) return;
   $('#fbList').innerHTML = '<table>' + Object.entries(S.meta.fbTypes).map(([k, v]) => `<tr><td class="nm"><code>${k}</code></td><td>${esc(v.desc)}<br><span class="muted">in: ${Object.keys(v.in).join(', ')} · out: ${Object.keys(v.out).join(', ')}</span></td></tr>`).join('') + '</table>';
 }
 
@@ -621,11 +723,12 @@ async function refreshProject(resetEditor) {
     S.info = await api('GET', '/api/project');
     const scenChanged = prevScen !== S.info.scen;
     $('#scenSel').value = S.info.scen;
-    if (resetEditor || scenChanged || (!S.editorDirty && document.activeElement !== code)) {
-      code.value = S.info.project.draft != null && S.info.project.draft !== '' ? S.info.project.draft : S.info.project.src;
-      S.editorDirty = code.value !== S.info.loadedSrc;
-      renderGutter();
-    }
+    if (resetEditor || scenChanged || !S.units || (!S.editorDirty && document.activeElement !== code && !$('#ldEditor').contains(document.activeElement))) {
+      S.units = unitsFromInfo();
+      if (scenChanged || resetEditor) S.cur = S.units.pous[0] ? S.units.pous[0].id : 'globals';
+      S.editorDirty = isDirty();
+      renderProgram();
+    } else { S.editorDirty = isDirty(); renderTypeList(); }
     HMI.setTheme(S.info.project.hmiTheme || 'hp');
     if (scenChanged) { S.hist = { t: [], v: {} }; S.ioDirty = false; buildPlantControls(); HMI.load(S.info.project.hmi); }
     else HMI.load(S.info.project.hmi, true);
@@ -662,6 +765,7 @@ function frame() {
   const tab = document.body.dataset.tab;
   if ($('#plantSec').offsetParent !== null) renderPlant();
   if (tab === 'hmi') HMI.update();
+  if (tab === 'program' && !$('#ldEditor').hidden) LDE.update();
   if (tab === 'tags') updateTags();
   if (tab === 'trend') updateTrendTab();
   if (tab === 'alarms') renderAlarms();

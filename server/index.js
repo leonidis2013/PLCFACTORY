@@ -7,7 +7,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { Runtime, ANALOG_FAULTS, DISCRETE_FAULTS, ACT_FAULTS } = require('./engine/runtime');
+const { Runtime, ANALOG_FAULTS, DISCRETE_FAULTS, ACT_FAULTS, normalizeProject, unitsOf, canonUnits } = require('./engine/runtime');
 const C = require('./engine/compiler');
 const plants = require('./plants');
 const modbus = require('./modbus');
@@ -26,12 +26,14 @@ const settingsFile = path.join(DATA, 'settings.json');
 const settings = Object.assign({ scen: 'tank', scanMs: 50 }, readJson(settingsFile, {}));
 const projFile = id => path.join(DATA, 'projects', id + '.json');
 
-function defaultProject(id) { return Object.assign({ scen: id, actFaults: {} }, plants[id].defaults()); }
+function defaultProject(id) { return normalizeProject(Object.assign({ scen: id, actFaults: {} }, plants[id].defaults())); }
 function loadProject(id) {
   const p = readJson(projFile(id), null);
   if (!p) return defaultProject(id);
   const d = defaultProject(id);
-  for (const k of ['src', 'sensors', 'hmi', 'alarms', 'pens', 'actFaults']) if (p[k] === undefined) p[k] = d[k];
+  if (p.pous === undefined && p.src === undefined) { p.pous = d.pous; p.types = d.types; p.globals = d.globals; }
+  for (const k of ['sensors', 'hmi', 'alarms', 'pens', 'actFaults']) if (p[k] === undefined) p[k] = d[k];
+  normalizeProject(p);
   p.scen = id;
   return p;
 }
@@ -80,6 +82,7 @@ setInterval(() => {
 setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 15000);
 
 // ---------- helpers ----------
+const cleanUnits = b => canonUnits(b);
 function send(res, code, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -98,7 +101,8 @@ function projectInfo() {
     version: pkg.version,
     scen: rt.project.scen,
     project: rt.project,
-    loadedSrc: rt.loadedSrc,
+    loaded: rt.loaded,
+    types: rt.typeList(),
     hasProgram: !!rt.program,
     scanMs: rt.scanMs,
     plant: { id: d.id, name: d.name, blurb: d.blurb, actuators: d.actuators, faults: d.faults, actions: d.actions, valves: d.valves || null },
@@ -143,17 +147,13 @@ const routes = {
   'GET /api/project': () => projectInfo(),
   'GET /api/history': () => rt.hist,
   'GET /api/events': () => rt.events,
-  'POST /api/check': b => {
-    const tags = {}; for (const k in rt.io) tags[k] = Object.assign({}, rt.io[k]);
-    try { const r = C.compile(String(b.src || ''), tags); return { ok: true, vars: r.declared.length }; }
-    catch (e) { return { ok: false, line: e.line || 0, msg: e.message }; }
-  },
+  'POST /api/check': b => rt.download(cleanUnits(b), true, true),
   'POST /api/download': b => {
-    const r = rt.download(String(b.src || ''), b.cold ? false : true);
-    if (r.ok) { rt.log('PLC', b.cold ? 'Program downloaded (cold start: memory reset)' : 'Program downloaded (warm: values kept)'); save(); }
+    const r = rt.download(cleanUnits(b), b.cold ? false : true);
+    if (r.ok) { rt.log('PLC', b.cold ? 'Program downloaded (cold start: memory reset)' : 'Program downloaded (warm: values kept)'); delete rt.project.draft; save(); }
     return r;
   },
-  'PUT /api/source': b => { rt.project.draft = String(b.src || ''); save(); return { ok: true }; },
+  'PUT /api/source': b => { rt.project.draft = cleanUnits(b); save(); return { ok: true }; },
   'POST /api/mode': b => rt.setMode(b.mode === 'RUN' ? 'RUN' : 'STOP'),
   'POST /api/scan': b => { rt.scanMs = Math.min(500, Math.max(10, +b.ms || 50)); startLoop(); save(); return { ok: true }; },
   'POST /api/write': b => ({ ok: rt.write(b.tag, b.value) }),
@@ -186,7 +186,8 @@ const routes = {
   'POST /api/reset-project': b => {
     const d = defaultProject(rt.project.scen);
     const keep = b.part && b.part !== 'all' ? b.part : null;
-    if (keep) { rt.project[keep] = d[keep]; if (keep === 'sensors') rt.setSensors(d.sensors); else if (keep === 'src') rt.download(d.src, false); rt.projVer++; }
+    if (keep === 'src') { delete rt.project.draft; rt.download(unitsOf(d), false); rt.projVer++; }
+    else if (keep) { rt.project[keep] = d[keep]; if (keep === 'sensors') rt.setSensors(d.sensors); rt.projVer++; }
     else rt.load(d);
     save(); return { ok: true };
   },

@@ -8,7 +8,7 @@ The soft PLC and the plant physics run on the server 24/7, so every browser you 
 
 | | |
 |---|---|
-| **Soft PLC** | Structured Text compiler: `IF/ELSIF/CASE/FOR/WHILE/REPEAT`, BOOL/INT/DINT/REAL/TIME. Function blocks `TON TOF TP CTU CTD CTUD R_TRIG F_TRIG SR RS PID`. Warm/cold download, RUN/STOP/FAULT, watchdog, configurable cycle time, line-numbered compile errors. |
+| **Soft PLC** | **Structured Text** and **Ladder Diagram** programs in one project (Data types → Globals → ordered programs). **UDTs** (`TYPE … STRUCT`), `ARRAY[..] OF` (including arrays of UDTs), member/index/bit access, **shift registers** (`BSL`/`BSR` on any array, `SHL`/`SHR`/`ROL`/`ROR`), bitwise logic. Compiler: `IF/ELSIF/CASE/FOR/WHILE/REPEAT`, BOOL/INT/DINT/REAL/TIME. Function blocks `TON TOF TP CTU CTD CTUD R_TRIG F_TRIG SR RS PID`. Warm/cold download, RUN/STOP/FAULT, watchdog, configurable cycle time, line-numbered compile errors. |
 | **PID** | Ideal-form PID FB with anti-windup, derivative-on-measurement, bumpless auto/manual, reverse acting and P/I/D term outputs. Comes with an HMI **PID faceplate** for live tuning and a tuning guide (step test, lambda, Ziegler–Nichols). |
 | **Flexible sensors** | The I/O tab builds the sensor list from the plant's physical measurements. Analog transmitters (engineering units, **4–20 mA** or **raw 0–27648**, range, noise), switches (SP, hysteresis, NO/NC), discrete contacts (limit switches, valve ZSO/ZSC), and position sensors placed anywhere along a line. |
 | **Fault injection** | Per sensor: stuck, drift, noisy, fail low/high, wire break. Per actuator: stuck on/off. Plus process faults for each plant (lost supply, glove breach, contamination…). |
@@ -105,10 +105,12 @@ server/
   index.js            HTTP API, Server-Sent Events, persistence, scan loop
   modbus.js           Modbus TCP server (FC 1,2,3,4,5,6,15,16)
   auth.js             users, sessions, roles, login throttling (auth-cli.js = recovery)
-  engine/compiler.js  Structured Text → closures; function blocks incl. PID
+  engine/compiler.js  Structured Text → closures; UDTs, arrays, function blocks incl. PID
+  engine/ladder.js    Ladder rungs → Structured Text
   engine/runtime.js   scan cycle, sensor/actuator layers, forces, alarms, history
   plants/*.js         physics models, I/O catalogues, example projects
 public/
+  js/ld.js            ladder editor + live power flow
   index.html, css/app.css
   js/app.js           engineering station (editor, I/O, alarms, trend, tags)
   js/hmi.js           HMI runtime + builder

@@ -44,14 +44,21 @@
         <button id="exampleBtn" data-min="engineer">Example</button>
         <span id="progStat" class="muted small"></span>
       </div>
+      <div id="unitBar" class="unitbar"></div>
+      <div id="unitHead" class="unithead"></div>
       <div id="errBar" hidden></div>
-      <div class="editor">
+      <div class="editor" id="stEditor">
         <div id="gutter"></div>
         <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off"></textarea>
       </div>
+      <div id="ldEditor" class="ld" hidden></div>
       <details class="card" open>
         <summary>I/O & system tags <span class="muted small">— tap a name to insert it</span></summary>
         <div id="ioList" class="chips"></div>
+      </details>
+      <details class="card">
+        <summary>Data types (UDTs) in the PLC</summary>
+        <div id="typeList" class="small"></div>
       </details>
       <details class="card">
         <summary>Function blocks</summary>
@@ -173,6 +180,7 @@
 <script src="js/scenes2d.js"></script>
 <script src="js/learn.js"></script>
 <script src="js/hmi.js"></script>
+<script src="js/ld.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

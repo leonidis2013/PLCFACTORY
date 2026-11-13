@@ -5,29 +5,28 @@ const { disc, probe, panelSensors, W, A, clamp } = require('./common');
 const MM = 5, BELT_Y = 190, X_SORT = 400, X_END = 722, SPEED = 90;
 const toPx = mm => mm / MM;
 
-const SRC = `(* =========================================================
-   CONVEYOR SORTER — tall boxes are pushed into bin B,
-   short boxes ride to the end into bin A. (example program)
-   State: 0 conveying, 10 settle, 20 extend pusher, 30 retract
-   ========================================================= *)
-VAR
-  HMI_Start, HMI_Stop, HMI_Reset : BOOL;
+const GLOBALS = `(* Global variables shared by the Sorter (ST) and Control (LD) programs *)
+VAR_GLOBAL
+  HMI_Start, HMI_Stop, HMI_Reset : BOOL;   (* momentary HMI buttons *)
   Running, Fault : BOOL;
-  State      : INT;
-  StartEdge  : R_TRIG;
-  SortEdge   : R_TRIG;
-  SettleTmr  : TON;
-  StrokeTmr  : TON;      (* watchdog on the pusher stroke *)
+  State      : INT;                         (* 0 conveying, 10 settle, 20 extend, 30 retract *)
   TallCount  : INT;
   ShortCount : INT;
+  JamTmr     : TON;                         (* used in ladder rung 9 *)
+  ExitCount  : CTU;                         (* boxes leaving at PE-3 *)
 END_VAR
+`;
 
-IF NOT I_EStop THEN Fault := TRUE; END_IF;
-IF HMI_Reset AND I_EStop THEN Fault := FALSE; State := 0; END_IF;
-
-StartEdge(CLK := I_Start OR HMI_Start);
-IF StartEdge.Q AND NOT Fault THEN Running := TRUE; END_IF;
-IF NOT I_Stop OR HMI_Stop OR Fault THEN Running := FALSE; END_IF;
+const SORTER = `(* =========================================================
+   SORTER (Structured Text) — tall boxes are pushed into bin B,
+   short boxes ride to the end into bin A.
+   Start/stop, faults and outputs are in the ladder program "Control".
+   ========================================================= *)
+VAR
+  SortEdge  : R_TRIG;
+  SettleTmr : TON;
+  StrokeTmr : TON;      (* watchdog on the pusher stroke *)
+END_VAR
 
 SortEdge(CLK := I_PE_Sort);
 SettleTmr(IN := State = 10, PT := T#200ms);
@@ -50,12 +49,23 @@ CASE State OF
 END_CASE;
 
 IF StrokeTmr.Q THEN Fault := TRUE; END_IF;   (* pusher never finished its stroke *)
-
-Q_Conveyor  := Running AND State = 0;
-Q_Divert    := State = 20 AND NOT Fault;
-Q_RunLamp   := Running;
-Q_FaultLamp := Fault;
 `;
+
+const NO = a => ({ t: 'NO', a }), NC = a => ({ t: 'NC', a }), PE = a => ({ t: 'P', a }), CMP = (a, op, b) => ({ t: 'CMP', a, op, b });
+const CONTROL_RUNGS = [
+  { comment: 'E-stop (NC contact) latches a fault', rows: [[NC('I_EStop')]], outs: [{ t: 'SET', a: 'Fault' }] },
+  { comment: 'Reset clears the fault once the E-stop is released', rows: [[NO('HMI_Reset'), NO('I_EStop')]], outs: [{ t: 'RST', a: 'Fault' }, { t: 'MOV', a: '0', b: 'State' }] },
+  { comment: 'Start (local button or HMI) — rising edge, only without a fault', rows: [[PE('I_Start'), NC('Fault')], [PE('HMI_Start'), NC('Fault')]], outs: [{ t: 'SET', a: 'Running' }] },
+  { comment: 'Stop: local STOP is wired NC, so the contact is NC too', rows: [[NC('I_Stop')], [NO('HMI_Stop')], [NO('Fault')]], outs: [{ t: 'RST', a: 'Running' }] },
+  { comment: 'Belt runs while running and the sorter is idle', rows: [[NO('Running'), CMP('State', '=', '0')]], outs: [{ t: 'COIL', a: 'Q_Conveyor' }] },
+  { comment: 'Pusher', rows: [[CMP('State', '=', '20'), NC('Fault')]], outs: [{ t: 'COIL', a: 'Q_Divert' }] },
+  { comment: 'Lamps', rows: [[NO('Running')]], outs: [{ t: 'COIL', a: 'Q_RunLamp' }] },
+  { comment: '', rows: [[NO('Fault')]], outs: [{ t: 'COIL', a: 'Q_FaultLamp' }] },
+  { comment: 'Jam detection: sort photoeye blocked for 3 s while the belt runs', rows: [[NO('I_PE_Sort'), NO('Q_Conveyor')]], outs: [{ t: 'TON', a: 'JamTmr', b: 'T#3s' }] },
+  { comment: '', rows: [[NO('JamTmr.Q')]], outs: [{ t: 'SET', a: 'Fault' }] },
+  { comment: 'Count boxes leaving the belt (reset with HMI reset)', rows: [[NO('I_PE_Exit')]], outs: [{ t: 'CTU', a: 'ExitCount', b: '9999' }] },
+  { comment: '', rows: [[NO('HMI_Reset')]], outs: [{ t: 'RES', a: 'ExitCount' }] },
+];
 
 module.exports = {
   id: 'conveyor',
@@ -169,7 +179,11 @@ module.exports = {
 
   defaults() {
     return {
-      src: SRC,
+      globals: GLOBALS,
+      pous: [
+        { id: 'sorter', name: 'Sorter', lang: 'ST', src: SORTER },
+        { id: 'control', name: 'Control', lang: 'LD', rungs: JSON.parse(JSON.stringify(CONTROL_RUNGS)) },
+      ],
       sensors: [
         ...panelSensors(),
         probe('I_PE_Entry', 'box', 500, { desc: 'Photoeye PE-1 at the infeed' }),
@@ -190,6 +204,7 @@ module.exports = {
         W('value', 360, 70, 150, 70, { tag: 'State', label: 'State', dec: 0 }),
         W('value', 360, 150, 150, 70, { tag: 'TallCount', label: 'Tall → B', dec: 0 }),
         W('value', 360, 230, 150, 70, { tag: 'ShortCount', label: 'Short → A', dec: 0 }),
+        W('value', 360, 310, 150, 70, { tag: 'ExitCount.CV', label: 'Exit count', dec: 0 }),
         W('button', 540, 70, 230, 70, { tag: 'HMI_Start', label: 'START', color: 'green' }),
         W('button', 540, 150, 230, 70, { tag: 'HMI_Stop', label: 'STOP', color: 'red' }),
         W('button', 540, 230, 230, 60, { tag: 'HMI_Reset', label: 'RESET FAULT', color: 'blue' }),

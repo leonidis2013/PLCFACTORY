@@ -5,11 +5,24 @@ const { analog, disc, probe, panelSensors, W, A, clamp, approach, ramp } = requi
 const PITCH = 70, X_FILL = 210, X_STOP = 350, X_REJ = 490, X_END = 630, SPEED = 60;
 const TARGET = 2.0, TOL = 0.05;
 
+const TYPES = `(* User-defined data types (UDTs) *)
+TYPE
+  VialData : STRUCT
+    Present : BOOL;     (* a vial is in this pocket *)
+    Filled  : BOOL;
+    Weight  : REAL;     (* fill weight, g *)
+    Bad     : BOOL;     (* reject this vial at the reject station *)
+  END_STRUCT;
+END_TYPE
+`;
+
 const SRC = `(* =========================================================
    ASEPTIC VIAL FILLER — isolator with VHP bio-decontamination
    Production: index -> fill (load cell) -> stopper -> reject/accept
    Decon:      0 idle, 10 gassing, 20 dwell, 30 aeration
    Run a decon cycle (HMI_Decon) before production can start.
+   Product tracking: Track is a shift register of VialData records
+   (see Data types) — one record per pocket, shifted with BSL on every index.
    ========================================================= *)
 VAR
   HMI_Start, HMI_Stop, HMI_Reset, HMI_Decon : BOOL;
@@ -21,7 +34,8 @@ VAR
   Step       : INT;            (* production sequence *)
   Decon      : INT;            (* decontamination sequence *)
   LastWeight : REAL;
-  BadAtFill, BadAtStopper, BadAtReject : BOOL;  (* shift register: one bit per pocket *)
+  Track      : ARRAY[0..3] OF VialData;   (* [0] fill · [1] stopper · [2] reject · [3] outfeed *)
+  NoVial     : VialData;                  (* empty record shifted in *)
   Good, Rejected : INT;
   StartEdge, DeconEdge, InPosEdge : R_TRIG;
   SettleTmr, DwellTmr, LowDPTmr : TON;
@@ -73,25 +87,27 @@ CASE Step OF
   0:  IF Running AND EnvOK AND I_NeedleUp AND I_StopperUp THEN Step := 10; END_IF;
   10: IF InPosEdge.Q THEN Step := 20; END_IF;                 (* index one pocket *)
   20: EnvLost := FALSE;
-      IF I_VialAtFill THEN Step := 21;
-      ELSE BadAtFill := FALSE; Step := 30; END_IF;
+      Track[0].Present := I_VialAtFill;
+      IF I_VialAtFill THEN Step := 21; ELSE Step := 30; END_IF;
   21: IF I_NeedleDown THEN Step := 22; END_IF;                (* needles down *)
   22: IF AI_FillWeight >= FillSP - Preact THEN Step := 23; END_IF;   (* fill to weight *)
   23: IF SettleTmr.Q THEN                                     (* let the scale settle *)
         LastWeight := AI_FillWeight;
-        BadAtFill := ABS(LastWeight - FillSP) > FillTol OR EnvLost;
+        Track[0].Filled := TRUE;
+        Track[0].Weight := LastWeight;
+        Track[0].Bad    := ABS(LastWeight - FillSP) > FillTol OR EnvLost;
         Step := 24;
       END_IF;
   24: IF I_NeedleUp THEN Step := 30; END_IF;
   30: IF I_VialAtStopper THEN
-        IF NOT I_StopperAvail THEN BadAtStopper := TRUE; END_IF;
+        IF NOT I_StopperAvail THEN Track[1].Bad := TRUE; END_IF;   (* no stopper = reject *)
         Step := 31;
       ELSE
         Step := 40;
       END_IF;
   31: IF I_StopperDown THEN Step := 32; END_IF;
   32: IF I_StopperUp THEN Step := 40; END_IF;
-  40: IF I_VialAtReject AND BadAtReject THEN
+  40: IF I_VialAtReject AND Track[2].Bad THEN
         Step := 41;
       ELSE
         IF I_VialAtReject THEN Good := Good + 1; END_IF;
@@ -99,9 +115,7 @@ CASE Step OF
       END_IF;
   41: IF I_RejectOut THEN Step := 42; END_IF;
   42: IF NOT I_RejectOut THEN Rejected := Rejected + 1; Step := 50; END_IF;
-  50: BadAtReject  := BadAtStopper;                           (* shift tracking data *)
-      BadAtStopper := BadAtFill;
-      BadAtFill    := FALSE;
+  50: BSL(Track, NoVial);          (* shift every record one pocket downstream *)
       IF Running AND EnvOK THEN Step := 10; ELSE Step := 0; END_IF;
 END_CASE;
 IF Step >= 21 AND Step <= 23 AND NOT EnvOK THEN EnvLost := TRUE; END_IF;
@@ -315,6 +329,7 @@ module.exports = {
 
   defaults() {
     return {
+      types: TYPES,
       src: SRC,
       sensors: [
         ...panelSensors(),

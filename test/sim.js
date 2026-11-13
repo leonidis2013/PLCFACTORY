@@ -50,3 +50,26 @@ const T = (rt, n) => rt.tags[n.toUpperCase()].v;
   console.log(log.join('\n'));
   console.log('bio:', rt.st.msgs, 'batches', T(rt, 'Batches'));
 }
+
+// Language features: UDTs, arrays, shift registers, bit access, ladder
+{
+  const C = require('../server/engine/compiler');
+  const LD = require('../server/engine/ladder');
+  const tags = {};
+  const ld = LD.toST({ name: 'L', rungs: [
+    { rows: [[{ t: 'NO', a: 'In' }]], outs: [{ t: 'BSL', a: 'Reg', b: 'Bit' }, { t: 'CTU', a: 'Cnt', b: '3' }] },
+    { rows: [[{ t: 'NO', a: 'Cnt.Q' }], [{ t: 'CMP', a: 'Reg[2]', op: '=', b: 'TRUE' }]], outs: [{ t: 'COIL', a: 'Out' }] },
+  ] }, 1);
+  const r = C.compileUnits([
+    { name: 'Data types', src: 'TYPE Rec : STRUCT A : BOOL; N : INT; END_STRUCT; END_TYPE' },
+    { name: 'Globals', src: 'VAR_GLOBAL In, Bit, Out : BOOL; Reg : ARRAY[0..3] OF BOOL; Cnt : CTU; W : DINT; R : ARRAY[1..3] OF Rec; END_VAR' },
+    { name: 'ST', src: 'W := SHL(W, 1); W.0 := Bit; R[1].N := R[1].N + 1; BSL(R, R[1]);' },
+    { name: 'L', src: ld.src },
+  ], tags);
+  C.RT.dt = 50;
+  const seq = [[1, 1], [0, 0], [1, 0], [0, 0], [1, 1], [0, 0]];
+  for (const [i, b] of seq) { tags.IN.v = !!i; tags.BIT.v = !!b; r.fn(); }
+  const ok = JSON.stringify(tags.REG.v) === '[true,false,true,false]' && tags.CNT.fb.CV === 3 && tags.OUT.v === true && tags.W.v === 34 && tags.R.v[2].N === 5;
+  console.log('language:', ok ? 'OK' : 'FAIL', JSON.stringify({ reg: tags.REG.v, cv: tags.CNT.fb.CV, out: tags.OUT.v, w: tags.W.v, r: tags.R.v.map(x => x.N) }));
+  if (!ok) process.exit(1);
+}
