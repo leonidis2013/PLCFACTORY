@@ -1,0 +1,17 @@
+# PLCFACTORY — works as-is for "docker compose up -d" and as a TrueNAS custom app (Install via YAML).
+services:
+  plcfactory:
+    image: ghcr.io/leonidis2013/plcfactory:latest
+    container_name: plcfactory
+    restart: unless-stopped
+    environment:
+      - TZ=America/Chicago
+      # - MODBUS=off          # disable the Modbus TCP server
+    ports:
+      - "8085:8080"   # web UI   -> http://<server>:8085
+      - "502:5020"    # Modbus TCP for SCADA clients
+    volumes:
+      - plcfactory-data:/data   # projects + settings (Docker named volume)
+
+volumes:
+  plcfactory-data:
