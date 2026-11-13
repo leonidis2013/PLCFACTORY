@@ -12,6 +12,7 @@ const C = require('./engine/compiler');
 const plants = require('./plants');
 const modbus = require('./modbus');
 const { Auth, ROLES } = require('./auth');
+const { Access } = require('./access');
 const pkg = require('../package.json');
 
 const PORT = +process.env.PORT || 8080;
@@ -38,17 +39,22 @@ function loadProject(id) {
   return p;
 }
 let saveT = null;
+function writeSettings() {
+  try { fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 1)); } catch (e) { log('Could not save settings: ' + e.message); }
+}
 function save() {
   clearTimeout(saveT);
   saveT = setTimeout(() => {
     try {
       fs.writeFileSync(projFile(rt.project.scen), JSON.stringify(rt.project, null, 1));
-      fs.writeFileSync(settingsFile, JSON.stringify({ scen: rt.project.scen, scanMs: rt.scanMs }));
+      Object.assign(settings, { scen: rt.project.scen, scanMs: rt.scanMs });
+      writeSettings();
     } catch (e) { log('Save failed: ' + e.message); }
   }, 300);
 }
 
-const auth = new Auth(DATA, log);
+const access = new Access(settings.access, s => { settings.access = s; writeSettings(); });
+const auth = new Auth(DATA, log, access);
 const rt = new Runtime(plants);
 rt.scanMs = settings.scanMs;
 rt.load(loadProject(plants[settings.scen] ? settings.scen : 'tank'));
@@ -67,7 +73,13 @@ function startLoop() {
 startLoop();
 
 // ---------- Modbus ----------
-const mb = process.env.MODBUS === 'off' ? null : modbus.start(rt, MODBUS_PORT, log);
+let mb = null;
+function applyModbus() {
+  const want = !!access.get('modbusEnabled');
+  if (want && !mb) mb = modbus.start(rt, MODBUS_PORT, log, access);
+  else if (!want && mb) { mb.stop(); mb = null; }
+}
+applyModbus();
 
 // ---------- SSE ----------
 const clients = new Set();
@@ -120,7 +132,7 @@ const PERM = {
   'POST /api/scan': 'engineer', 'POST /api/force': 'engineer', 'PUT /api/sensors': 'engineer', 'PUT /api/actfaults': 'engineer',
   'PUT /api/sensorfault': 'engineer', 'PUT /api/hmitheme': 'engineer', 'PUT /api/hmi': 'engineer', 'PUT /api/alarms': 'engineer',
   'POST /api/scenario': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
-  'GET /api/users': 'admin', 'POST /api/users': 'admin', 'POST /api/users/delete': 'admin',
+  'GET /api/users': 'admin', 'GET /api/settings': 'admin', 'PUT /api/settings': 'admin', 'POST /api/users': 'admin', 'POST /api/users/delete': 'admin',
 };
 const PUBLIC = new Set(['/login.html', '/js/login.js', '/setup.html', '/js/setup.js', '/css/app.css', '/healthz', '/api/login', '/api/setup']);
 function secHeaders(res) {
@@ -129,11 +141,7 @@ function secHeaders(res) {
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
 }
-function sameOrigin(req) {
-  const o = req.headers.origin;
-  if (!o) return true;                         // non-browser clients / same-origin GET
-  try { return new URL(o).host === req.headers.host || (auth.trustProxy && new URL(o).host === req.headers['x-forwarded-host']); } catch { return false; }
-}
+const sameOrigin = req => access.sameOrigin(req);
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 
 // ---------- routes ----------
@@ -194,6 +202,12 @@ const routes = {
   'POST /api/plant-reset': () => { const f = rt.st.faults; rt.st = rt.def.create(); rt.st.faults = f; rt.log('SIM', 'Plant reset'); return { ok: true }; },
   'GET /api/me': (b, me) => ({ ok: true, username: me.username, role: me.role, mustChange: !!me.mustChange, noAuth: !!me.noAuth, roles: ROLES }),
   'GET /api/users': () => ({ ok: true, users: auth.list() }),
+  'GET /api/settings': (b, me, req) => Object.assign({ ok: true, diag: access.diag(req), modbus: { running: !!mb, port: MODBUS_PORT, clients: mb ? mb.clients() : 0 }, version: pkg.version }, access.view()),
+  'PUT /api/settings': (b, me) => {
+    const r = access.update(b || {});
+    if (r.ok) { applyModbus(); log(`Settings changed by ${me.username}: ${Object.keys(b || {}).join(', ')}`); rt.log('SYS', `External access settings changed by ${me.username}`); }
+    return r;
+  },
   'POST /api/users': (b, me) => auth.upsert(me, b),
   'POST /api/users/delete': (b, me) => auth.remove(me, b),
   'POST /api/import': b => {
@@ -209,6 +223,7 @@ const server = http.createServer(async (req, res) => {
   const key = `${req.method} ${url.pathname}`;
   secHeaders(res);
   try {
+    if (url.pathname !== '/healthz' && !access.hostAllowed(req)) return send(res, 421, { ok: false, msg: `Host '${access.host(req)}' is not in the allowed hosts list (Settings → External access)` });
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       // CSRF defence: same-origin JSON only (plus SameSite=Strict cookies)
       if (!sameOrigin(req) || !String(req.headers['content-type'] || '').startsWith('application/json')) return send(res, 403, { ok: false, msg: 'Cross-site request refused' });
@@ -257,7 +272,7 @@ const server = http.createServer(async (req, res) => {
     if (key === 'GET /healthz') return send(res, 200, { ok: true });
     if (routes[key]) {
       const b = req.method === 'GET' ? {} : await body(req);
-      const out = routes[key](b, me) || { ok: true };
+      const out = routes[key](b, me, req) || { ok: true };
       return send(res, 200, out);
     }
     if (req.method !== 'GET') return send(res, 404, { ok: false, msg: 'not found' });

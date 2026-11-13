@@ -14,7 +14,6 @@ const path = require('path');
 const ROLES = ['viewer', 'operator', 'engineer', 'admin'];
 const rank = r => ROLES.indexOf(r);
 const COOKIE = 'plcf_session';
-const SESSION_DAYS = +process.env.SESSION_DAYS || 7;
 const MAX_FAILS_USER = 5, MAX_FAILS_IP = 20, LOCK_MS = 15 * 60 * 1000;
 
 function hashPassword(pw) {
@@ -36,12 +35,12 @@ const validName = u => /^[A-Za-z0-9_.-]{2,32}$/.test(u || '');
 const pwProblem = pw => (typeof pw !== 'string' || pw.length < 10) ? 'Password must be at least 10 characters' : pw.length > 200 ? 'Password too long' : null;
 
 class Auth {
-  constructor(dataDir, log) {
+  constructor(dataDir, log, access) {
+    this.access = access;
     this.log = log;
     this.usersFile = path.join(dataDir, 'users.json');
     this.sessFile = path.join(dataDir, 'sessions.json');
     this.enabled = String(process.env.AUTH || 'on').toLowerCase() !== 'off';
-    this.trustProxy = /^(1|true|yes)$/i.test(process.env.TRUST_PROXY || '');
     this.users = this.read(this.usersFile, []);
     this.sessions = new Map(Object.entries(this.read(this.sessFile, {})));
     this.fails = new Map();
@@ -76,14 +75,9 @@ class Auth {
     this.log(`\n============================================================\n  PLCFACTORY first-run setup\n  Open the web UI to create the administrator account.\n  From your local network no code is needed. From anywhere else\n  (or through a reverse proxy) enter this one-time setup code:\n\n      ${this.setupCode}\n============================================================`);
   }
 
-  /** True when the request comes straight from a private (LAN) address, not through a proxy. */
-  isLocal(req) {
-    const proxied = !!(req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.headers['forwarded'] || req.headers['cf-connecting-ip']);
-    if (proxied && !this.trustProxy) return false;          // can't tell who is behind the proxy
-    let ip = this.clientIp(req).replace(/^::ffff:/, '');
-    return ip === '::1' || /^127\./.test(ip) || /^10\./.test(ip) || /^192\.168\./.test(ip) || /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
-      /^169\.254\./.test(ip) || /^f[cd][0-9a-f]{2}:/i.test(ip) || /^fe80:/i.test(ip);
-  }
+  get trustProxy() { return this.access.get('trustProxy'); }
+  days() { return Math.max(1, +this.access.get('sessionDays') || 7); }
+  isLocal(req) { return this.access.isLocal(req); }
   setupInfo(req) { return { setup: !!this.setupMode, codeRequired: !!this.setupMode && !this.isLocal(req) }; }
   setup(req, res, b) {
     if (!this.setupMode) return { status: 409, body: { ok: false, msg: 'Setup is already complete' } };
@@ -106,11 +100,8 @@ class Auth {
     return Object.assign(this.login(req, res, { username: name, password: b.password }), {});
   }
 
-  clientIp(req) {
-    if (this.trustProxy && req.headers['x-forwarded-for']) return String(req.headers['x-forwarded-for']).split(',')[0].trim();
-    return req.socket.remoteAddress || '?';
-  }
-  isHttps(req) { return !!req.socket.encrypted || (this.trustProxy && String(req.headers['x-forwarded-proto'] || '').startsWith('https')) || /^(1|true|yes)$/i.test(process.env.COOKIE_SECURE || ''); }
+  clientIp(req) { return this.access.clientIp(req); }
+  isHttps(req) { return this.access.isHttps(req); }
   cookieToken(req) {
     const c = req.headers.cookie || '';
     const m = c.split(/;\s*/).find(x => x.startsWith(COOKIE + '='));
@@ -133,7 +124,7 @@ class Auth {
     const u = this.users.find(x => x.username === s.username);
     if (!u) return null;
     // sliding expiry (refresh at most once an hour)
-    if (s.exp - Date.now() < (SESSION_DAYS * 864e5 - 36e5)) { s.exp = Date.now() + SESSION_DAYS * 864e5; this.saveSessions(); }
+    if (s.exp - Date.now() < (this.days() * 864e5 - 36e5)) { s.exp = Date.now() + this.days() * 864e5; this.saveSessions(); }
     return { username: u.username, role: u.role, mustChange: !!u.mustChange };
   }
   can(user, minRole) { return !!user && rank(user.role) >= rank(minRole); }
@@ -168,9 +159,9 @@ class Auth {
     }
     for (const k of keys) this.fails.delete(k);
     const token = crypto.randomBytes(32).toString('base64url');
-    this.sessions.set(sha(token), { username: u.username, exp: Date.now() + SESSION_DAYS * 864e5, created: Date.now(), ip: this.clientIp(req) });
+    this.sessions.set(sha(token), { username: u.username, exp: Date.now() + this.days() * 864e5, created: Date.now(), ip: this.clientIp(req) });
     this.saveSessions();
-    this.setCookie(req, res, token, SESSION_DAYS * 86400);
+    this.setCookie(req, res, token, this.days() * 86400);
     this.log(`Login: ${u.username} (${u.role}) from ${this.clientIp(req)}`);
     return { status: 200, body: { ok: true, username: u.username, role: u.role, mustChange: !!u.mustChange } };
   }

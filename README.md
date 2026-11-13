@@ -54,9 +54,7 @@ docker build -t ghcr.io/leonidis2013/plcfactory:latest . && docker compose up -d
 | `DATA_DIR` | `/data` | Projects (`projects/<plant>.json`) and settings |
 
 | `ADMIN_USER` / `ADMIN_PASSWORD` | — | Optional: create the first admin without the setup page (only when no users exist) |
-| `TRUST_PROXY` | off | Set `true` behind a reverse proxy so client IPs and HTTPS are detected |
-| `COOKIE_SECURE` | auto | Force the `Secure` cookie flag |
-| `SESSION_DAYS` | `7` | Sign-in lifetime (sliding) |
+| `PUBLIC_URL`, `TRUST_PROXY`, `TRUSTED_PROXIES`, `ALLOWED_HOSTS`, `COOKIE_SECURE`, `SESSION_DAYS`, `MODBUS`, `MODBUS_WRITE`, `MODBUS_ALLOW` | — | Optional. Normally set in **Settings → External access**; if set here they override and lock the field |
 | `AUTH` | on | `off` disables sign-in. Only for an isolated LAN |
 
 ## Security & users
@@ -87,8 +85,16 @@ How it works:
 - Write requests must be same-origin JSON (CSRF protection).
 - A strict Content-Security-Policy, `X-Frame-Options: DENY` and `nosniff` are set on every response.
 
-**Exposing it to the internet:**
-1. Put it behind HTTPS: Nginx Proxy Manager, Traefik, Caddy or a Cloudflare Tunnel. Set `TRUST_PROXY=true`.
+**Exposing it to the internet:** the admin-only **Settings** tab has everything you need, and changes apply without a restart:
+
+- **Connection test:** shows what the server sees from your browser (client IP, proxy, HTTPS, host) and warns about misconfiguration.
+- **Public URL**, **Behind a reverse proxy** (with a trusted-proxy address list), **Secure cookies**, **Allowed hostnames** (DNS-rebinding protection) and **Session lifetime**.
+- **Modbus:** on/off, read-only mode and allowed client addresses.
+- Copy-paste examples for Nginx Proxy Manager, Caddy, Traefik and Cloudflare Tunnel.
+
+Steps:
+
+1. Put it behind HTTPS: Nginx Proxy Manager, Traefik, Caddy or a Cloudflare Tunnel. Turn on **Behind a reverse proxy**, then open the Settings tab through your public address and check the connection test.
 2. Forward **only the web port**. Never forward Modbus (502). Modbus/TCP has no authentication, so anyone who reaches it can read and write the PLC. Keep it on your LAN, or set `MODBUS=off`.
 3. Give people the lowest role they need.
 
@@ -113,7 +119,8 @@ node test/sim.js         # headless check: runs every example program against it
 server/
   index.js            HTTP API, Server-Sent Events, persistence, scan loop
   modbus.js           Modbus TCP server (FC 1,2,3,4,5,6,15,16)
-  auth.js             users, sessions, roles, login throttling (auth-cli.js = recovery)
+  auth.js             users, sessions, roles, login throttling, first-run setup (auth-cli.js = recovery)
+  access.js           external-access settings: proxy trust, hosts, cookies, Modbus exposure
   engine/compiler.js  Structured Text → closures; UDTs, arrays, function blocks incl. PID
   engine/ladder.js    Ladder rungs → Structured Text
   engine/runtime.js   scan cycle, sensor/actuator layers, forces, alarms, history

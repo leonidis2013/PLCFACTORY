@@ -74,7 +74,7 @@ nav#tabs button.on{color:#fff;border-bottom-color:var(--accent);background:#1a1e
 #layout{padding:0 10px 30px}
 .tab{display:none}
 body[data-tab=program] #tab-program, body[data-tab=hmi] #tab-hmi, body[data-tab=io] #tab-io, body[data-tab=alarms] #tab-alarms,
-body[data-tab=trend] #tab-trend, body[data-tab=tags] #tab-tags, body[data-tab=learn] #tab-learn{display:block}
+body[data-tab=trend] #tab-trend, body[data-tab=tags] #tab-tags, body[data-tab=learn] #tab-learn, body[data-tab=settings] #tab-settings{display:block}
 #plantSec{display:none}
 body[data-tab=plant] #plantSec{display:block}
 @media (min-width:1150px){
@@ -398,3 +398,23 @@ input.rc:hover,input.rc:focus{border-bottom-color:var(--line2);outline:0}
 .meter{height:4px;background:#0d0f11;border:1px solid var(--line);margin-top:-6px}
 .meter i{display:block;height:100%;width:0;transition:width .15s}
 @media (max-width:600px){ .login-page .brand>span:not(.mark){display:inline} .login-page .brand small{display:none} }
+
+/* settings */
+.set-grid{display:grid;grid-template-columns:minmax(180px,260px) 1fr;gap:10px 16px;align-items:start}
+.set-grid>.k{font:600 13px var(--cond);letter-spacing:.1em;text-transform:uppercase;color:#cfd6dc;padding-top:6px}
+.set-grid>.v{display:flex;flex-direction:column;gap:4px}
+.set-grid>.v input:not([type=checkbox]),.set-grid>.v select{max-width:460px;font-family:var(--mono);font-size:13px}
+.set-grid .hint{font-size:12px;color:var(--muted)}
+.set-grid .lock{font:600 11px var(--cond);letter-spacing:.08em;color:var(--accent)}
+.sw-row{display:flex;gap:8px;align-items:center;font-size:13px}
+@media (max-width:700px){.set-grid{grid-template-columns:1fr}.set-grid>.k{padding-top:4px}}
+.diag td:first-child{font:600 12px var(--cond);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.diag td{font:12.5px var(--mono)}
+.diag .ok{color:#8ef0a6} .diag .no{color:#ffb0a8}
+.note{margin:6px 0;padding:6px 10px;border-radius:var(--r);font-size:12.5px;border-left:4px solid}
+.note.warn{background:#26200b;border-color:var(--accent);color:#ffe08a}
+.note.bad{background:#2a1214;border-color:var(--red);color:#ffc9c9}
+.note.good{background:#10241a;border-color:var(--green);color:#bff0cb}
+.snip{position:relative}
+.snip pre{background:#0b0d0f;border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px;overflow:auto;font:12px/1.5 var(--mono);margin:6px 0}
+.snip button{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:11px}

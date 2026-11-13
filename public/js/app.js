@@ -26,7 +26,10 @@ async function api(method, url, body) {
 }
 function applyRole() {
   document.body.dataset.role = S.me.role;
-  $$('[data-min]').forEach(el => { el.disabled = !can(el.dataset.min); if (el.disabled) el.title = `Needs the ${el.dataset.min} role`; });
+  $$('[data-min]').forEach(el => {
+    if (el.dataset.hide) { el.hidden = !can(el.dataset.min); return; }
+    el.disabled = !can(el.dataset.min); if (el.disabled) el.title = `Needs the ${el.dataset.min} role`;
+  });
   $('#userBtn').innerHTML = S.me.noAuth ? '<small>NO AUTH</small>' : `${esc(S.me.username)}<small>${esc(S.me.role)}</small>`;
 }
 function toast(msg, err) {
@@ -79,6 +82,7 @@ function setTab(t) {
   if (t === 'trend') renderPens();
   if (t === 'learn') $('#learn').innerHTML = LEARN.html(S.info, S.meta);
   if (t === 'program') renderProgram();
+  if (t === 'settings') renderSettings();
 }
 $$('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
 
@@ -144,6 +148,134 @@ $('#menuBtn').onclick = () => {
     $('#mYes').onclick = async () => { await api('POST', '/api/reset-project', { part }); closeModal(); await refreshProject(true); toast('Restored'); };
   });
 };
+// ---------- settings (admin): external access ----------
+const ENV_NAMES = { publicUrl: 'PUBLIC_URL', trustProxy: 'TRUST_PROXY', trustedProxies: 'TRUSTED_PROXIES', cookieSecure: 'COOKIE_SECURE', allowedHosts: 'ALLOWED_HOSTS',
+  sessionDays: 'SESSION_DAYS', modbusEnabled: 'MODBUS', modbusWrite: 'MODBUS_WRITE', modbusAllow: 'MODBUS_ALLOW' };
+async function renderSettings() {
+  if (!can('admin')) { $('#settings').innerHTML = '<div class="card">Settings are for administrators.</div>'; return; }
+  const r = await api('GET', '/api/settings');
+  if (!r.ok) return;
+  const c = r.settings, L = r.locked, d = r.diag;
+  const lock = k => L[k] ? `<span class="lock">🔒 set by environment variable ${ENV_NAMES[k]} — change it in the app's YAML</span>` : '';
+  const dis = k => L[k] ? 'disabled' : '';
+  const host = (() => { try { return c.publicUrl ? new URL(c.publicUrl).host : 'plc.example.com'; } catch (e) { return 'plc.example.com'; } })();
+  const lanPort = location.port || '8085';
+  const notes = [];
+  const viaProxy = !!(d.headers['x-forwarded-for'] || d.headers['x-real-ip'] || d.headers['cf-connecting-ip'] || d.headers.forwarded);
+  if (viaProxy && !d.proxyTrusted) notes.push(['bad', c.trustProxy
+    ? `This request came through a proxy at <b>${esc(d.peer)}</b>, but that address isn't in <i>Trusted proxy addresses</i>. Add it so client IPs (login lockout) and HTTPS are detected.`
+    : 'This request came through a reverse proxy, but <b>Behind a reverse proxy</b> is off. Every visitor looks like the proxy (shared login lockout) and HTTPS is not detected. Turn it on.']);
+  if (!viaProxy && c.trustProxy) notes.push(['warn', 'Proxy trust is on, but this request came directly (no forwarding headers). That is fine on the LAN. If the server is also reachable directly from the internet, keep <i>Trusted proxy addresses</i> narrow so nobody can fake their IP.']);
+  if (location.protocol === 'https:' && !d.https) notes.push(['bad', 'Your browser is on HTTPS but the server does not know it, so session cookies are sent without the <i>Secure</i> flag. Make the proxy send <code>X-Forwarded-Proto: https</code> and trust it, or set Secure cookies to <b>Always</b>.']);
+  if (c.publicUrl && location.origin !== c.publicUrl && location.protocol === 'https:') notes.push(['warn', `You are using ${esc(location.origin)} but the Public URL is ${esc(c.publicUrl)}.`]);
+  if (c.modbusEnabled && /any|\*/.test(c.modbusAllow)) notes.push(['bad', 'Modbus accepts clients from <b>any</b> address. Modbus has no password — limit it to your LAN unless you really need otherwise, and never port-forward 502.']);
+  if (!notes.length && viaProxy && d.proxyTrusted && d.https) notes.push(['good', 'Reverse proxy detected and trusted, HTTPS detected — external access is set up correctly.']);
+  const yes = v => v ? '<span class="ok">yes</span>' : '<span class="no">no</span>';
+  const snip = (title, body) => `<div class="snip"><b class="small">${title}</b><button data-copy>Copy</button><pre>${esc(body)}</pre></div>`;
+  $('#settings').innerHTML = `
+  <div class="card"><h3>Connection test</h3>
+    <p class="muted small">What the server sees for <i>this</i> browser right now. Open this page through your public address to check the reverse proxy.</p>
+    ${notes.map(([k, m]) => `<div class="note ${k}">${m}</div>`).join('')}
+    <table class="diag">
+      <tr><td>Your IP (as used for lockouts)</td><td>${esc(d.clientIp)}</td></tr>
+      <tr><td>Connected from (peer)</td><td>${esc(d.peer)}</td></tr>
+      <tr><td>Via trusted proxy</td><td>${yes(d.proxyTrusted)}</td></tr>
+      <tr><td>HTTPS detected</td><td>${yes(d.https)}</td></tr>
+      <tr><td>Host</td><td>${esc(d.host)} ${d.hostAllowed ? '' : '<span class="no">(not allowed)</span>'}</td></tr>
+      <tr><td>Treated as LAN</td><td>${yes(d.local)}</td></tr>
+      ${Object.entries(d.headers).filter(([k, v]) => v && !(k === 'host' && v === d.host)).map(([k, v]) => `<tr><td>Header ${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}
+    </table>
+    <div class="row" style="margin-top:8px"><button id="setRefresh">Run test again</button></div>
+  </div>
+
+  <div class="card"><h3>External access</h3>
+    <div class="set-grid">
+      <div class="k">Public URL</div><div class="v"><input id="s_publicUrl" placeholder="https://${esc(host)}" value="${esc(c.publicUrl)}" ${dis('publicUrl')}>
+        <span class="hint">The address people use from outside, e.g. <code>https://plc.example.com</code>. Used to accept requests from that origin. Leave empty for LAN-only.</span>${lock('publicUrl')}</div>
+      <div class="k">Behind a reverse proxy</div><div class="v"><label class="sw-row"><input type="checkbox" id="s_trustProxy" ${c.trustProxy ? 'checked' : ''} ${dis('trustProxy')}> Trust <code>X-Forwarded-For / -Proto / -Host</code> headers</label>
+        <span class="hint">Turn on when Nginx Proxy Manager, Traefik, Caddy or a Cloudflare Tunnel sits in front. Leave off if the server is reached directly.</span>${lock('trustProxy')}</div>
+      <div class="k">Trusted proxy addresses</div><div class="v"><input id="s_trustedProxies" value="${esc(c.trustedProxies)}" ${dis('trustedProxies')}>
+        <span class="hint">Only these peers may set forwarding headers. <code>private</code> = any LAN/Docker address. Tighter is safer, e.g. <code>172.16.0.0/12</code> or the proxy's IP (it shows as "Connected from" above when you come through the proxy).</span>${lock('trustedProxies')}</div>
+      <div class="k">Secure cookies</div><div class="v"><select id="s_cookieSecure" ${dis('cookieSecure')}>
+          ${[['auto', 'Auto — when HTTPS is detected'], ['always', 'Always (site is only used over HTTPS)'], ['never', 'Never (plain HTTP only)']].map(([v, l]) => `<option value="${v}" ${c.cookieSecure === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <span class="hint">"Always" breaks sign-in over plain http:// on the LAN — use Auto unless you only ever use HTTPS.</span>${lock('cookieSecure')}</div>
+      <div class="k">Allowed hostnames</div><div class="v"><input id="s_allowedHosts" placeholder="plc.example.com, *.example.com" value="${esc(c.allowedHosts)}" ${dis('allowedHosts')}>
+        <span class="hint">Optional. Requests for any other hostname are refused (protects against DNS-rebinding). IP addresses and localhost always work, so you can't lock yourself out on the LAN.</span>${lock('allowedHosts')}</div>
+      <div class="k">Session lifetime</div><div class="v"><span class="sw-row"><input type="number" min="1" max="365" id="s_sessionDays" value="${c.sessionDays}" style="width:90px" ${dis('sessionDays')}> days</span>
+        <span class="hint">How long a sign-in lasts without use. Shorter is safer on shared or public devices.</span>${lock('sessionDays')}</div>
+    </div>
+  </div>
+
+  <div class="card"><h3>Modbus TCP</h3>
+    <div class="set-grid">
+      <div class="k">Server</div><div class="v"><label class="sw-row"><input type="checkbox" id="s_modbusEnabled" ${c.modbusEnabled ? 'checked' : ''} ${dis('modbusEnabled')}> Enabled</label>
+        <span class="hint">Status: ${r.modbus.running ? `<span class="ok">running</span> on container port ${r.modbus.port} (published as 502), ${r.modbus.clients} client(s) connected` : 'stopped'}.</span>${lock('modbusEnabled')}</div>
+      <div class="k">Writes</div><div class="v"><label class="sw-row"><input type="checkbox" id="s_modbusWrite" ${c.modbusWrite ? 'checked' : ''} ${dis('modbusWrite')}> Allow SCADA clients to write coils and registers</label>
+        <span class="hint">Off = read-only: a SCADA can monitor but not press buttons or change setpoints.</span>${lock('modbusWrite')}</div>
+      <div class="k">Allowed clients</div><div class="v"><input id="s_modbusAllow" value="${esc(c.modbusAllow)}" ${dis('modbusAllow')}>
+        <span class="hint"><code>private</code> = LAN only (recommended), a list like <code>192.168.1.50, 10.0.0.0/8</code>, or <code>any</code>. Modbus has no password — never port-forward 502.</span>${lock('modbusAllow')}</div>
+    </div>
+  </div>
+
+  <div class="row"><button id="setSave" class="primary">Save settings</button><span class="muted small">Changes apply immediately — no restart.</span></div>
+
+  <details class="card"><summary>Reverse proxy examples</summary>
+    <p class="muted small">Replace <code>${esc(host)}</code> with your domain and <code>TRUENAS_IP</code> with the server's LAN address. The web UI uses Server-Sent Events: turn off proxy buffering for <code>/api/stream</code> (PLCFACTORY already sends <code>X-Accel-Buffering: no</code>, which Nginx honours).</p>
+    ${snip('Nginx Proxy Manager', `Proxy Host → Details
+  Domain:            ${host}
+  Scheme / Forward:  http  TRUENAS_IP  ${lanPort}
+  Block common exploits: on      Websockets: not needed
+SSL tab: request a Let's Encrypt certificate, Force SSL: on
+
+Then in PLCFACTORY Settings:
+  Public URL:              https://${host}
+  Behind a reverse proxy:  on
+  Trusted proxy addresses: <IP shown as "Connected from" when you test through the proxy>`)}
+    ${snip('Caddy (Caddyfile)', `${host} {
+\treverse_proxy TRUENAS_IP:${lanPort} {
+\t\tflush_interval -1
+\t}
+}`)}
+    ${snip('Traefik (docker labels on the plcfactory service)', `labels:
+  - traefik.enable=true
+  - traefik.http.routers.plcfactory.rule=Host(\`${host}\`)
+  - traefik.http.routers.plcfactory.entrypoints=websecure
+  - traefik.http.routers.plcfactory.tls.certresolver=letsencrypt
+  - traefik.http.services.plcfactory.loadbalancer.server.port=8080`)}
+    ${snip('Cloudflare Tunnel (cloudflared)', `Public hostname:  ${host}
+Service:          http://TRUENAS_IP:${lanPort}
+
+PLCFACTORY uses the CF-Connecting-IP header for the real client IP when the proxy is trusted.
+Trusted proxy addresses: the cloudflared container/host IP (or "private" if it runs on your LAN).`)}
+    ${snip('Environment variables (lock settings from the YAML)', `environment:
+  - PUBLIC_URL=https://${host}
+  - TRUST_PROXY=true
+  - TRUSTED_PROXIES=172.16.0.0/12
+  - ALLOWED_HOSTS=${host}
+  - COOKIE_SECURE=auto
+  - SESSION_DAYS=7
+  - MODBUS=on
+  - MODBUS_WRITE=true
+  - MODBUS_ALLOW=private`)}
+  </details>`;
+  $('#setRefresh').onclick = renderSettings;
+  $$('#settings [data-copy]').forEach(b => b.onclick = () => { try { navigator.clipboard.writeText(b.nextElementSibling.textContent); toast('Copied'); } catch (e) {} });
+  $('#setSave').onclick = async () => {
+    const body = {};
+    for (const k of ['publicUrl', 'trustedProxies', 'cookieSecure', 'allowedHosts', 'modbusAllow']) if (!L[k]) body[k] = $('#s_' + k).value;
+    for (const k of ['trustProxy', 'modbusEnabled', 'modbusWrite']) if (!L[k]) body[k] = $('#s_' + k).checked;
+    if (!L.sessionDays) body.sessionDays = +$('#s_sessionDays').value;
+    // guard: allowed hosts must include the host you're on right now (unless it's an IP)
+    const h = location.hostname, list = (body.allowedHosts || '').split(/[\s,]+/).filter(Boolean);
+    if (list.length && !/^[\d.]+$|^\[|^localhost$/.test(h) && !list.some(x => x === h || (x.startsWith('*.') && h.endsWith(x.slice(1)))) && (!body.publicUrl || new URL(body.publicUrl).hostname !== h)) {
+      return toast(`Allowed hostnames must include ${h} — the address you're using now — or you'd lock yourself out`, true);
+    }
+    const x = await api('PUT', '/api/settings', body);
+    if (!x.ok) return toast(x.msg, true);
+    toast('Settings saved'); renderSettings(); refreshProject();
+  };
+}
+
 // ---------- account ----------
 $('#userBtn').onclick = () => {
   if (S.me.noAuth) return toast('Authentication is off (AUTH=off) — do not expose this server to the internet.', true);

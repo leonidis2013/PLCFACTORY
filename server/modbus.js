@@ -11,6 +11,7 @@
  * 32-bit values are big-endian (ABCD). REAL = IEEE-754 float, INT/DINT/TIME = signed 32-bit.
  */
 const net = require('net');
+const { inList } = require('./access');
 
 function buildMap(rt) {
   const coils = [], di = [], ir = [], hr = [];
@@ -45,10 +46,12 @@ function regsOf(l) {
   return [b.readUInt16BE(0), b.readUInt16BE(2)];
 }
 
-function start(rt, port, log) {
+function start(rt, port, log, access) {
   let map = null, ver = -1;
   const getMap = () => { if (ver !== rt.tagVer) { map = buildMap(rt); ver = rt.tagVer; } return map; };
   const server = net.createServer(sock => {
+    const peer = String(sock.remoteAddress || '').replace(/^::ffff:/, '');
+    if (access && !inList(peer, access.get('modbusAllow'))) { log(`Modbus: refused client ${peer} (not in allowed list)`); sock.destroy(); return; }
     let buf = Buffer.alloc(0);
     sock.on('data', d => {
       buf = Buffer.concat([buf, d]);
@@ -111,6 +114,7 @@ function start(rt, port, log) {
         rt.write(K, l && l.base === 'REAL' ? b.readFloatBE(0) : b.readInt32BE(0));
       }
     };
+    if ([5, 6, 15, 16].includes(fc) && access && !access.get('modbusWrite')) return exc(frame, fc, 1);   // read-only mode
     switch (fc) {
       case 1: return bits(m.coils, K => rt.leafMap[K] && rt.leafMap[K].get());
       case 2: return bits(m.di, K => rt.leafMap[K] && rt.leafMap[K].get());
@@ -143,9 +147,15 @@ function start(rt, port, log) {
     return exc(frame, fc, 1);
   }
 
+  const conns = new Set();
+  server.on('connection', c => { conns.add(c); c.on('close', () => conns.delete(c)); });
   server.on('error', e => log(`Modbus TCP server error: ${e.message}`));
   server.listen(port, () => log(`Modbus TCP server listening on port ${port}`));
-  return { describe: () => describe(rt, getMap()) };
+  return {
+    describe: () => describe(rt, getMap()),
+    clients: () => conns.size,
+    stop: () => { for (const c of conns) c.destroy(); server.close(); log('Modbus TCP server stopped'); },
+  };
 }
 
 module.exports = { start };
