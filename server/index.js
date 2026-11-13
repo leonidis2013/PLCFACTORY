@@ -148,6 +148,7 @@ const routes = {
     if (!s) return { ok: false };
     s.fault = b.fault || 'none'; rt.log('SIM', `Sensor fault on ${s.tag}: ${s.fault}`); save(); return { ok: true };
   },
+  'PUT /api/hmitheme': b => { rt.project.hmiTheme = b.theme === 'dark' ? 'dark' : 'hp'; rt.projVer++; save(); return { ok: true }; },
   'PUT /api/hmi': b => { rt.project.hmi = b.hmi || []; rt.projVer++; save(); return { ok: true }; },
   'PUT /api/alarms': b => { rt.project.alarms = b.alarms || []; rt.alm = {}; rt.almVer++; rt.projVer++; save(); return { ok: true }; },
   'PUT /api/pens': b => { rt.project.pens = b.pens || []; save(); return { ok: true }; },

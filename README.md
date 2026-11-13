@@ -1,6 +1,6 @@
 # PLCFACTORY
 
-A self-hosted **PLC & SCADA training simulator** in Docker. You write IEC 61131-3 **Structured Text**, build an **HMI**, set up the plant's **sensors**, and watch virtual equipment react in **3D** (or 2D).
+A self-hosted **PLC & SCADA training simulator** in Docker, with an industrial engineering-station look (graphite + safety yellow, blueprint schematics). You write IEC 61131-3 **Structured Text**, build an **HMI**, set up the plant's **sensors**, and watch virtual equipment react in **3D** (or 2D).
 
 The soft PLC and the plant physics run on the server 24/7, so every browser you connect sees the same live PLC: a tablet HMI and a laptop engineering station at once. A built-in **Modbus TCP server** lets real SCADA software (Ignition, FUXA, Node-RED, Codesys…) connect to the simulated PLC.
 
@@ -12,7 +12,7 @@ The soft PLC and the plant physics run on the server 24/7, so every browser you 
 | **PID** | Ideal-form PID FB with anti-windup, derivative-on-measurement, bumpless auto/manual, reverse acting and P/I/D term outputs. Comes with an HMI **PID faceplate** for live tuning and a tuning guide (step test, lambda, Ziegler–Nichols). |
 | **Flexible sensors** | The I/O tab builds the sensor list from the plant's physical measurements. Analog transmitters (engineering units, **4–20 mA** or **raw 0–27648**, range, noise), switches (SP, hysteresis, NO/NC), discrete contacts (limit switches, valve ZSO/ZSC), and position sensors placed anywhere along a line. |
 | **Fault injection** | Per sensor: stuck, drift, noisy, fail low/high, wire break. Per actuator: stuck on/off. Plus process faults for each plant (lost supply, glove breach, contamination…). |
-| **HMI builder** | Drag-and-drop editor on an 800×480 canvas: buttons, switches, lamps, values, setpoints, bars, motors, valves, PID faceplates, mini-trends, alarm banner. Full-screen mode for a tablet. |
+| **HMI builder** | Drag-and-drop editor on an 800×480 canvas: buttons, switches, lamps, values, setpoints, bars, motors, valves, PID faceplates, mini-trends, alarm banner. Two screen styles: **ISA-101 high-performance** (gray, colour only for abnormal states, as used in real plants) or **dark control room**. Full-screen mode for a tablet. |
 | **SCADA** | Alarms (priorities, ack, return-to-normal), event log, 6-pen trend with per-pen scaling, tag browser with write and **force**. |
 | **3D / 2D plant views** | Custom WebGL renderer with no external libraries, so it works offline. Orbit, pinch-zoom and pan, with live labels. |
 

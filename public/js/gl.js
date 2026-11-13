@@ -79,7 +79,7 @@ const GL3D = (() => {
       vec3 col = uC * (0.32 + 0.62*d1 + 0.18*d2) + vec3(sp);
       col = mix(col, uC, uE);
       float fog = clamp((length(uEye - vW) - 12.0) / 40.0, 0.0, 0.6);
-      col = mix(col, vec3(0.07,0.09,0.11), fog);
+      col = mix(col, vec3(0.085,0.095,0.105), fog);
       gl_FragColor = vec4(col, uA); }`;
 
   function hex(c) {
@@ -127,7 +127,7 @@ const GL3D = (() => {
       const gl = this.gl, L = this.loc;
       const [w, h] = this.resize();
       gl.viewport(0, 0, this.cv.width, this.cv.height);
-      gl.clearColor(0.07, 0.09, 0.11, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.clearColor(0.085, 0.095, 0.105, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       const eye = this.eye();
       const VP = M.mul(M.persp(0.8, w / Math.max(h, 1), 0.05, 100), M.lookAt(eye, this.cam.target, [0, 1, 0]));
       this.VP = VP; this.wh = [w, h];

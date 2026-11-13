@@ -82,7 +82,7 @@ $('#scenSel').onchange = async e => {
 function updateHeader() {
   const s = S.snap; if (!s) return;
   const st = $('#plcStat');
-  st.textContent = s.plc + (s.plc === 'FAULT' ? '' : '');
+  st.lastChild.textContent = s.plc;
   st.className = 'pill ' + s.plc.toLowerCase();
   st.title = s.fault || '';
   const rb = $('#runBtn');
@@ -447,7 +447,7 @@ function drawTrend(cv, pens, winS, opts = {}) {
   const h = S.hist, n = h.t.length; if (!n) return;
   const tEnd = S.trendPaused ? h.t[n - 1] : Math.max(h.t[n - 1], Date.now() - 150), t0 = tEnd - winS * 1000;
   const L = opts.compact ? 4 : 8, R = W - (opts.compact ? 4 : 8), T = 6, B = H - (opts.compact ? 4 : 18);
-  g.strokeStyle = '#1f2832'; g.lineWidth = 1; g.font = '10px system-ui'; g.fillStyle = '#5d6d7e';
+  g.strokeStyle = opts.light ? '#c9ced3' : '#20262b'; g.lineWidth = 1; g.font = '11px "IBM Plex Mono", monospace'; g.fillStyle = opts.light ? '#69727a' : '#5f6870';
   for (let i = 0; i <= 4; i++) { const y = T + (B - T) * i / 4; g.beginPath(); g.moveTo(L, y); g.lineTo(R, y); g.stroke(); }
   const step = winS <= 30 ? 5 : winS <= 60 ? 10 : 20;
   for (let s = 0; s <= winS; s += step) { const x = R - (R - L) * s / winS; g.beginPath(); g.moveTo(x, T); g.lineTo(x, B); g.stroke(); if (!opts.compact) g.fillText(`-${s}s`, x - 12, H - 4); }
@@ -543,6 +543,7 @@ async function refreshProject(resetEditor) {
       S.editorDirty = code.value !== S.info.loadedSrc;
       renderGutter();
     }
+    HMI.setTheme(S.info.project.hmiTheme || 'hp');
     if (scenChanged) { S.hist = { t: [], v: {} }; S.ioDirty = false; buildPlantControls(); HMI.load(S.info.project.hmi); }
     else HMI.load(S.info.project.hmi, true);
     progStatus();

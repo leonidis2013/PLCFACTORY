@@ -14,9 +14,13 @@ const SCENES3D = (() => {
   const fx = (v, d = 1) => (v === undefined || v === null ? '—' : typeof v === 'boolean' ? (v ? 'ON' : 'OFF') : (+v).toFixed(d));
 
   function floor(objs, w = 14, d = 10) {
-    objs.push(box([0, -0.05, 0], [w, 0.1, d], '#1a2028'));
-    for (let i = -Math.floor(w / 2); i <= w / 2; i++) objs.push(box([i, 0.002, 0], [0.012, 0.004, d], '#262f3a'));
-    for (let j = -Math.floor(d / 2); j <= d / 2; j++) objs.push(box([0, 0.002, j], [w, 0.004, 0.012], '#262f3a'));
+    objs.push(box([0, -0.05, 0], [w, 0.1, d], '#2a2e31'));                 // sealed concrete
+    for (let i = -Math.floor(w / 2); i <= w / 2; i++) objs.push(box([i, 0.002, 0], [0.01, 0.004, d], '#33383c'));
+    for (let j = -Math.floor(d / 2); j <= d / 2; j++) objs.push(box([0, 0.002, j], [w, 0.004, 0.01], '#33383c'));
+    // yellow safety walkway marking around the equipment zone
+    const zw = 7.4, zd = 3.4, t = 0.07;
+    for (const z of [-zd / 2, zd / 2]) objs.push(box([0, 0.004, z], [zw, 0.006, t], '#d9a404'));
+    for (const x of [-zw / 2, zw / 2]) objs.push(box([x, 0.004, 0], [t, 0.006, zd], '#d9a404'));
   }
   function valve3d(objs, p, pos, axis = 'x', size = 0.12) {
     const c = mix(OFF, ON, pos);

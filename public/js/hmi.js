@@ -25,6 +25,7 @@ const HMI = (() => {
     $('#hmiResetBtn').onclick = async () => { await fetch('/api/reset-project', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ part: 'hmi' }) }); sel = null; };
     $('#hmiFullBtn').onclick = () => { wrap.classList.toggle('full'); layout(); };
     canvas.addEventListener('pointerdown', onEditDown);
+    $('#hmiTheme').onchange = e => { setTheme(e.target.value); build(); fetch('/api/hmitheme', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme: e.target.value }) }); };
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && wrap.classList.contains('full')) { wrap.classList.remove('full'); layout(); } });
   }
   const uid = () => 'w' + Math.random().toString(36).slice(2, 9);
@@ -66,7 +67,7 @@ const HMI = (() => {
     const col = COLORS[w.color] || null;
     switch (w.type) {
       case 'label':
-        el.innerHTML = `<span style="font-size:${+w.size || 18}px;color:${col || '#dfe7ef'}">${esc(w.label || '')}</span>`; break;
+        el.innerHTML = `<span style="font-size:${+w.size || 18}px;${col ? 'color:' + col : ''}">${esc(w.label || '')}</span>`; break;
       case 'button': {
         el.innerHTML = `<button class="hb ${w.color || 'gray'}">${esc(w.label || 'BUTTON')}</button>`;
         const b = el.firstChild;
@@ -83,8 +84,10 @@ const HMI = (() => {
         break;
       case 'lamp': {
         el.innerHTML = `<div class="dot"></div><div class="lbl">${esc(w.label || w.tag)}</div>`;
-        const d = el.firstChild, c = col || COLORS.green;
-        upd = () => { const v = T(w), on = truthy(v); d.style.background = on ? c : '#2b333d'; d.style.boxShadow = on ? `0 0 12px ${c}` : 'none'; el.classList.toggle('bad', v === undefined); };
+        el.style.setProperty('--c', col || COLORS.green);
+        // ISA-101: red/amber lamps are abnormal indications and keep their colour; others show as gray "on"
+        if (w.color === 'red' || w.color === 'amber') el.classList.add('alm');
+        upd = () => { const v = T(w); el.classList.toggle('on', truthy(v)); el.classList.toggle('bad', v === undefined); };
         break;
       }
       case 'value': {
@@ -103,8 +106,8 @@ const HMI = (() => {
       }
       case 'bar': {
         el.innerHTML = `<div class="lbl">${esc(w.label || w.tag)}</div><div class="track"><div class="fill"></div></div><div class="bv"></div>`;
-        const fill = el.querySelector('.fill'), bv = el.querySelector('.bv'), c = col || COLORS.blue;
-        fill.style.background = c;
+        const fill = el.querySelector('.fill'), bv = el.querySelector('.bv');
+        el.style.setProperty('--c', col || COLORS.blue);
         if (!w.vert) { el.style.flexDirection = 'column'; }
         upd = () => {
           const v = T(w), lo = +w.min || 0, hi = +w.max || 100, f = Math.max(0, Math.min(1, ((+v || 0) - lo) / (hi - lo || 1)));
@@ -114,15 +117,13 @@ const HMI = (() => {
         break;
       }
       case 'motor': {
-        el.innerHTML = `<svg viewBox="0 0 100 80"><circle cx="50" cy="40" r="28" stroke="#0008" stroke-width="3"/><text x="50" y="49" text-anchor="middle" font-size="26" font-weight="800" fill="#fff">M</text></svg><div class="lbl">${esc(w.label || w.tag)}</div>`;
-        const c = el.querySelector('circle');
-        upd = () => { const v = T(w); c.setAttribute('fill', truthy(v) ? '#1f9a55' : '#4a5563'); el.classList.toggle('bad', v === undefined); };
+        el.innerHTML = `<svg viewBox="0 0 100 80"><circle cx="50" cy="40" r="28"/><text x="50" y="49" text-anchor="middle" font-size="26" font-weight="700" font-family="Barlow Condensed, Arial Narrow, sans-serif">M</text></svg><div class="lbl">${esc(w.label || w.tag)}</div>`;
+        upd = () => { const v = T(w); el.classList.toggle('on', truthy(v)); el.classList.toggle('bad', v === undefined); };
         break;
       }
       case 'valve': {
-        el.innerHTML = `<svg viewBox="0 0 100 70"><path d="M15 20 L50 40 L15 60 Z M85 20 L50 40 L85 60 Z" stroke="#0008" stroke-width="3"/><path d="M50 40 V12 M36 12 H64" stroke="#cfd8e2" stroke-width="4"/></svg><div class="lbl">${esc(w.label || w.tag)}</div>`;
-        const p = el.querySelector('path');
-        upd = () => { const v = T(w); p.setAttribute('fill', truthy(v) ? '#1f9a55' : '#4a5563'); el.classList.toggle('bad', v === undefined); };
+        el.innerHTML = `<svg viewBox="0 0 100 70"><path class="body" d="M15 20 L50 40 L15 60 Z M85 20 L50 40 L85 60 Z" stroke-linejoin="round"/><path class="stem" d="M50 40 V12 M36 12 H64" stroke-width="4" fill="none"/></svg><div class="lbl">${esc(w.label || w.tag)}</div>`;
+        upd = () => { const v = T(w); el.classList.toggle('on', truthy(v)); el.classList.toggle('bad', v === undefined); };
         break;
       }
       case 'alarms':
@@ -137,9 +138,9 @@ const HMI = (() => {
         break;
       case 'pid': {
         el.innerHTML = `<div class="hd"><span>${esc(w.label || w.tag)}</span><span class="md"></span></div>
-          <div class="bars"><div><div class="t"><i style="background:#3fa9f5"></i></div><span>SP <b class="sp"></b></span></div>
-          <div><div class="t"><i style="background:#2ecc71"></i></div><span>PV <b class="pv"></b></span></div>
-          <div><div class="t"><i style="background:#f5a623"></i></div><span>OUT <b class="y"></b></span></div></div>
+          <div class="bars"><div><div class="t"><i style="background:#2f6aa8"></i></div><span>SP <b class="sp"></b></span></div>
+          <div><div class="t"><i style="background:#5d6770"></i></div><span>PV <b class="pv"></b></span></div>
+          <div><div class="t"><i style="background:#b88a00"></i></div><span>OUT <b class="y"></b></span></div></div>
           <div class="prm"><label>KP<input data-p="KP" type="number" step="any"></label><label>TN (s)<input data-p="TN" type="number" step="any"></label><label>TV (s)<input data-p="TV" type="number" step="any"></label></div>
           <div class="am"><button data-m="0">AUTO</button><button data-m="1">MAN</button><input data-p="Y_MANUAL" type="number" step="any" title="Manual output %" style="width:60px"></div>`;
         const bars = el.querySelectorAll('.t i'), sp = el.querySelector('.sp'), pv = el.querySelector('.pv'), y = el.querySelector('.y'), md = el.querySelector('.md');
@@ -165,14 +166,24 @@ const HMI = (() => {
         el.innerHTML = `<div class="lbl">${esc(w.label || '')}</div><canvas></canvas>`;
         const cv = el.querySelector('canvas');
         let t = 0;
-        upd = () => { const now = performance.now(); if (now - t < 100) return; t = now; drawTrend(cv, [{ tag: w.tag, min: w.min ?? 0, max: w.max ?? 100 }, { tag: w.tag2, min: w.min ?? 0, max: w.max ?? 100 }], +w.win || 60, { compact: true }); };
+        upd = () => { const now = performance.now(); if (now - t < 100) return; t = now; drawTrend(cv, [{ tag: w.tag, min: w.min ?? 0, max: w.max ?? 100 }, { tag: w.tag2, min: w.min ?? 0, max: w.max ?? 100 }], +w.win || 60, { compact: true, light: canvas.classList.contains('hp') }); };
         break;
       }
     }
     return { el, upd: () => { if (!editing || true) upd(); } };
   }
 
-  function update() { for (const it of items) it.upd(); }
+  let clockT = 0;
+  function update() {
+    for (const it of items) it.upd();
+    const now = Date.now();
+    if (now - clockT > 1000) { clockT = now; const c = document.getElementById('hmiClock'); if (c) c.textContent = new Date().toLocaleTimeString(); }
+  }
+  function setTheme(t) {
+    t = t === 'dark' ? 'dark' : 'hp';
+    canvas.classList.toggle('hp', t === 'hp'); canvas.classList.toggle('dark', t === 'dark');
+    const sel = document.getElementById('hmiTheme'); if (sel) sel.value = t;
+  }
 
   // ----- editing -----
   function select(id) {
@@ -234,5 +245,5 @@ const HMI = (() => {
       });
     });
   }
-  return { init, load, layout, update };
+  return { init, load, layout, update, setTheme };
 })();
