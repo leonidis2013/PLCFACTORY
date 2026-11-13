@@ -13,11 +13,12 @@
 <body data-tab="program">
 <header id="top">
   <div class="brand"><span class="mark"></span><span>PLC<b>FACTORY</b></span><small class="hide-s">SOFT PLC · SCADA TRAINER</small></div>
-  <select id="scenSel" title="Plant / scenario"></select>
-  <button id="runBtn" class="mode">RUN</button>
+  <select id="scenSel" title="Plant / scenario" data-min="engineer"></select>
+  <button id="runBtn" class="mode" data-min="engineer">RUN</button>
   <span id="plcStat" class="pill"><i></i><span>—</span></span>
   <span id="scanInfo" class="muted small hide-s"></span>
   <span id="conn" class="pill small" title="Connection to the PLC server">●</span>
+  <button id="userBtn" class="ghost" title="Account"></button>
   <button id="menuBtn" class="ghost" title="Project">⋯</button>
 </header>
 <nav id="tabs">
@@ -36,11 +37,11 @@
     <!-- PROGRAM -->
     <section id="tab-program" class="tab">
       <div class="toolbar">
-        <button id="dlBtn" class="primary" title="Compile and load into the PLC, keeping variable values">⬇ Download</button>
-        <button id="coldBtn" title="Download and reset all variables to their initial values">Cold</button>
-        <button id="chkBtn">Check</button>
-        <button id="revertBtn" title="Discard edits and show the program that is in the PLC">Revert</button>
-        <button id="exampleBtn">Example</button>
+        <button id="dlBtn" data-min="engineer" class="primary" title="Compile and load into the PLC, keeping variable values">⬇ Download</button>
+        <button id="coldBtn" data-min="engineer" title="Download and reset all variables to their initial values">Cold</button>
+        <button id="chkBtn" data-min="engineer">Check</button>
+        <button id="revertBtn" data-min="engineer" title="Discard edits and show the program that is in the PLC">Revert</button>
+        <button id="exampleBtn" data-min="engineer">Example</button>
         <span id="progStat" class="muted small"></span>
       </div>
       <div id="errBar" hidden></div>
@@ -61,7 +62,7 @@
     <!-- HMI -->
     <section id="tab-hmi" class="tab">
       <div class="toolbar">
-        <button id="hmiEditBtn">✎ Edit</button>
+        <button id="hmiEditBtn" data-min="engineer">✎ Edit</button>
         <span id="hmiEditTools" hidden>
           <select id="hmiAddType">
             <option value="button">Button (momentary)</option><option value="switch">Switch (toggle)</option>
@@ -77,7 +78,7 @@
         </span>
         <span class="grow"></span>
         <label class="small muted row" title="Operator screen style"><span class="hide-s">Screen style</span>
-          <select id="hmiTheme"><option value="hp">ISA-101 high-performance</option><option value="dark">Dark control room</option></select></label>
+          <select id="hmiTheme" data-min="engineer"><option value="hp">ISA-101 high-performance</option><option value="dark">Dark control room</option></select></label>
         <button id="hmiFullBtn" class="ghost" title="Full screen HMI">⛶</button>
       </div>
       <div class="bezel"><div class="bezel-tag"><span>HMI-01 · OPERATOR STATION</span><span id="hmiClock"></span></div><div id="hmiWrap"><div id="hmiCanvas" class="hp"></div></div></div>
@@ -88,7 +89,7 @@
     <section id="tab-io" class="tab">
       <div class="card">
         <div class="row between"><h3>Sensors (inputs)</h3>
-          <span><button id="ioAddBtn">＋ Sensor</button> <button id="ioApplyBtn" class="primary">Apply I/O config</button></span></div>
+          <span><button id="ioAddBtn" data-min="engineer">＋ Sensor</button> <button id="ioApplyBtn" data-min="engineer" class="primary">Apply I/O config</button></span></div>
         <p class="muted small">Each sensor reads a physical measurement from the plant and creates a PLC input tag. Change tags, ranges, contact types and positions, then <b>Apply</b> (the program is recompiled). Sensor <b>faults</b> apply immediately.</p>
         <div id="ioDirty" class="warn small" hidden>Unapplied changes.</div>
         <div id="sensorList"></div>
@@ -107,13 +108,13 @@
     <!-- ALARMS -->
     <section id="tab-alarms" class="tab">
       <div class="card">
-        <div class="row between"><h3>Active alarms</h3><button id="ackAllBtn">Acknowledge all</button></div>
+        <div class="row between"><h3>Active alarms</h3><button id="ackAllBtn" data-min="operator">Acknowledge all</button></div>
         <div id="almList"></div>
       </div>
       <details class="card">
         <summary>Alarm configuration</summary>
         <div id="almCfg"></div>
-        <div class="row"><button id="almAddBtn">＋ Alarm</button><button id="almSaveBtn" class="primary">Save alarms</button></div>
+        <div class="row"><button id="almAddBtn" data-min="engineer">＋ Alarm</button><button id="almSaveBtn" data-min="engineer" class="primary">Save alarms</button></div>
       </details>
       <div class="card"><h3>Event log</h3><div id="evList" class="small"></div></div>
     </section>
@@ -126,7 +127,7 @@
         <span class="muted small">Up to 6 pens. Each pen has its own scale.</span>
       </div>
       <canvas id="trend"></canvas>
-      <div class="card"><div id="penList"></div><button id="penAddBtn">＋ Pen</button></div>
+      <div class="card"><div id="penList"></div><button id="penAddBtn" data-min="operator">＋ Pen</button></div>
     </section>
 
     <!-- TAGS -->

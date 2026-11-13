@@ -11,6 +11,7 @@ const { Runtime, ANALOG_FAULTS, DISCRETE_FAULTS, ACT_FAULTS } = require('./engin
 const C = require('./engine/compiler');
 const plants = require('./plants');
 const modbus = require('./modbus');
+const { Auth, ROLES } = require('./auth');
 const pkg = require('../package.json');
 
 const PORT = +process.env.PORT || 8080;
@@ -45,6 +46,7 @@ function save() {
   }, 300);
 }
 
+const auth = new Auth(DATA, log);
 const rt = new Runtime(plants);
 rt.scanMs = settings.scanMs;
 rt.load(loadProject(plants[settings.scen] ? settings.scen : 'tank'));
@@ -106,6 +108,28 @@ function projectInfo() {
     projVer: rt.projVer, tagVer: rt.tagVer,
   };
 }
+// minimum role per API route (GET routes not listed need 'viewer')
+const PERM = {
+  'POST /api/write': 'operator', 'POST /api/panel': 'operator', 'POST /api/ack': 'operator', 'POST /api/plant': 'operator',
+  'POST /api/plant-reset': 'operator', 'PUT /api/pens': 'operator',
+  'POST /api/check': 'engineer', 'POST /api/download': 'engineer', 'PUT /api/source': 'engineer', 'POST /api/mode': 'engineer',
+  'POST /api/scan': 'engineer', 'POST /api/force': 'engineer', 'PUT /api/sensors': 'engineer', 'PUT /api/actfaults': 'engineer',
+  'PUT /api/sensorfault': 'engineer', 'PUT /api/hmitheme': 'engineer', 'PUT /api/hmi': 'engineer', 'PUT /api/alarms': 'engineer',
+  'POST /api/scenario': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
+  'GET /api/users': 'admin', 'POST /api/users': 'admin', 'POST /api/users/delete': 'admin',
+};
+const PUBLIC = new Set(['/login.html', '/js/login.js', '/css/app.css', '/healthz', '/api/login']);
+function secHeaders(res) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+}
+function sameOrigin(req) {
+  const o = req.headers.origin;
+  if (!o) return true;                         // non-browser clients / same-origin GET
+  try { return new URL(o).host === req.headers.host || (auth.trustProxy && new URL(o).host === req.headers['x-forwarded-host']); } catch { return false; }
+}
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 
 // ---------- routes ----------
@@ -135,7 +159,8 @@ const routes = {
   'POST /api/write': b => ({ ok: rt.write(b.tag, b.value) }),
   'POST /api/force': b => ({ ok: rt.force(b.tag, b.value === undefined ? null : b.value) }),
   'POST /api/panel': b => { if (b.key in rt.panel) rt.panel[b.key] = !!b.value; return { ok: true }; },
-  'POST /api/plant': b => {
+  'POST /api/plant': (b, me) => {
+    if (b.fault && !auth.can(me, 'engineer')) return { ok: false, msg: 'Fault injection needs the engineer role' };
     const st = rt.st;
     if (b.fault) { st.faults[b.fault] = !!b.value; rt.log('SIM', `Process fault ${b.value ? 'ON' : 'off'}: ${b.fault}`); }
     else if (b.action && rt.def.doAction) { rt.def.doAction(st, b.action, b.value, rt); rt.log('SIM', `Plant: ${b.action}${b.value !== undefined ? ' = ' + b.value : ''}`); }
@@ -166,6 +191,10 @@ const routes = {
     save(); return { ok: true };
   },
   'POST /api/plant-reset': () => { const f = rt.st.faults; rt.st = rt.def.create(); rt.st.faults = f; rt.log('SIM', 'Plant reset'); return { ok: true }; },
+  'GET /api/me': (b, me) => ({ ok: true, username: me.username, role: me.role, mustChange: !!me.mustChange, noAuth: !!me.noAuth, roles: ROLES }),
+  'GET /api/users': () => ({ ok: true, users: auth.list() }),
+  'POST /api/users': (b, me) => auth.upsert(me, b),
+  'POST /api/users/delete': (b, me) => auth.remove(me, b),
   'POST /api/import': b => {
     const p = b.project;
     if (!p || !plants[p.scen]) return { ok: false, msg: 'Not a PLCFACTORY project file' };
@@ -177,7 +206,34 @@ const routes = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const key = `${req.method} ${url.pathname}`;
+  secHeaders(res);
   try {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      // CSRF defence: same-origin JSON only (plus SameSite=Strict cookies)
+      if (!sameOrigin(req) || !String(req.headers['content-type'] || '').startsWith('application/json')) return send(res, 403, { ok: false, msg: 'Cross-site request refused' });
+    }
+    if (key === 'POST /api/login') {
+      if (!auth.enabled) return send(res, 200, { ok: true });
+      const r = auth.login(req, res, await body(req));
+      return send(res, r.status, r.body);
+    }
+    if (key === 'POST /api/logout') return send(res, 200, auth.logout(req, res));
+    const me = auth.user(req);
+    if (!me && !PUBLIC.has(url.pathname)) {
+      if (url.pathname.startsWith('/api/')) return send(res, 401, { ok: false, msg: 'Not logged in' });
+      res.writeHead(302, { Location: '/login.html' + (url.pathname === '/' ? '' : '?next=' + encodeURIComponent(url.pathname)) });
+      return res.end();
+    }
+    if (me && url.pathname === '/login.html' && !me.noAuth) { res.writeHead(302, { Location: '/' }); return res.end(); }
+    if (key === 'POST /api/password') {
+      if (me.noAuth) return send(res, 200, { ok: false, msg: 'Authentication is turned off (AUTH=off)' });
+      return send(res, 200, auth.changePassword(req, me, await body(req)));
+    }
+    if (url.pathname.startsWith('/api/') && key !== 'GET /api/me') {
+      if (me.mustChange && req.method !== 'GET') return send(res, 403, { ok: false, msg: 'Change your password first' });
+      const need = PERM[key] || (req.method === 'GET' ? 'viewer' : 'admin');
+      if (!auth.can(me, need)) return send(res, 403, { ok: false, msg: `Your role (${me.role}) can't do that — needs ${need}` });
+    }
     if (key === 'GET /api/stream') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.write('retry: 2000\n\n');
@@ -189,10 +245,11 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="plcfactory-${rt.project.scen}.json"` });
       return res.end(JSON.stringify(rt.project, null, 1));
     }
-    if (key === 'GET /healthz') return send(res, 200, { ok: true, plc: rt.plc });
+    if (key === 'GET /healthz') return send(res, 200, { ok: true });
     if (routes[key]) {
       const b = req.method === 'GET' ? {} : await body(req);
-      return send(res, 200, routes[key](b) || { ok: true });
+      const out = routes[key](b, me) || { ok: true };
+      return send(res, 200, out);
     }
     if (req.method !== 'GET') return send(res, 404, { ok: false, msg: 'not found' });
     let p = decodeURIComponent(url.pathname);

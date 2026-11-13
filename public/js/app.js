@@ -14,9 +14,20 @@ const S = {
 };
 
 // ---------- API ----------
+const ROLES = ['viewer', 'operator', 'engineer', 'admin'];
+const can = min => !!S.me && ROLES.indexOf(S.me.role) >= ROLES.indexOf(min);
 async function api(method, url, body) {
-  const r = await fetch(url, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
-  return r.json();
+  const get = method === 'GET';
+  const r = await fetch(url, { method, headers: get ? {} : { 'Content-Type': 'application/json' }, body: get ? undefined : JSON.stringify(body || {}), credentials: 'same-origin' });
+  if (r.status === 401) { location.replace('/login.html?next=' + encodeURIComponent(location.pathname + location.hash)); throw new Error('not logged in'); }
+  const j = await r.json().catch(() => ({ ok: false, msg: 'Bad response' }));
+  if (r.status === 403 || r.status === 429) toast(j.msg || 'Not allowed', true);
+  return j;
+}
+function applyRole() {
+  document.body.dataset.role = S.me.role;
+  $$('[data-min]').forEach(el => { el.disabled = !can(el.dataset.min); if (el.disabled) el.title = `Needs the ${el.dataset.min} role`; });
+  $('#userBtn').innerHTML = S.me.noAuth ? '<small>NO AUTH</small>' : `${esc(S.me.username)}<small>${esc(S.me.role)}</small>`;
 }
 function toast(msg, err) {
   const t = $('#toast'); t.textContent = msg; t.className = err ? 'err' : ''; t.hidden = false;
@@ -31,7 +42,7 @@ const App = {
   },
   has(name) { const v = App.val(name); return v !== undefined; },
   isFb(name) { return S.snap && S.snap.fb[String(name).toUpperCase()] !== undefined; },
-  write(tag, value) { if (S.snap) { const N = String(tag).toUpperCase(); if (!N.includes('.') && N in S.snap.tags) S.snap.tags[N] = value; } return api('POST', '/api/write', { tag, value }); },
+  write(tag, value) { if (!can('operator')) { toast('Viewers can watch but not operate', true); return Promise.resolve({ ok: false }); } if (S.snap) { const N = String(tag).toUpperCase(); if (!N.includes('.') && N in S.snap.tags) S.snap.tags[N] = value; } return api('POST', '/api/write', { tag, value }); },
   tagNames() { return (S.info ? S.info.tags : []).filter(t => t.kind !== 'FB').map(t => t.name); },
   fbNames(type) { return (S.info ? S.info.tags : []).filter(t => t.kind === 'FB' && (!type || t.type === type)).map(t => t.name); },
   hist: () => S.hist,
@@ -130,8 +141,80 @@ $('#menuBtn').onclick = () => {
     $('#mYes').onclick = async () => { await api('POST', '/api/reset-project', { part }); closeModal(); await refreshProject(true); toast('Restored'); };
   });
 };
+// ---------- account ----------
+$('#userBtn').onclick = () => {
+  if (S.me.noAuth) return toast('Authentication is off (AUTH=off) — do not expose this server to the internet.', true);
+  modal(`<h3>Signed in as ${esc(S.me.username)}</h3><p class="role-note">Role: <b>${esc(S.me.role)}</b> — ${roleText(S.me.role)}</p>
+    <div class="menu"><button id="uPw">Change password</button>${can('admin') ? '<button id="uUsers">Manage users</button>' : ''}<button id="uOut" class="danger">Sign out</button></div>
+    <div class="row" style="justify-content:flex-end"><button id="mClose">Close</button></div>`);
+  $('#mClose').onclick = closeModal;
+  $('#uPw').onclick = () => passwordDialog(false);
+  if ($('#uUsers')) $('#uUsers').onclick = usersDialog;
+  $('#uOut').onclick = async () => { await api('POST', '/api/logout', {}); location.replace('/login.html'); };
+};
+function roleText(r) {
+  return { viewer: 'can watch everything, change nothing', operator: 'can run the HMI, operator panel, plant controls and acknowledge alarms',
+    engineer: 'can also program, download, configure I/O, HMI and alarms, force and inject faults', admin: 'can also manage users' }[r] || '';
+}
+function passwordDialog(forced) {
+  modal(`<h3>${forced ? 'Choose a new password' : 'Change password'}</h3>
+    ${forced ? '<p class="warn small">You are using a temporary password. Set your own before continuing.</p>' : ''}
+    <form id="pwForm" class="menu" autocomplete="on">
+      <input type="text" name="username" value="${esc(S.me.username)}" autocomplete="username" hidden>
+      <label class="f">Current password<input type="password" id="pwOld" autocomplete="current-password" required></label>
+      <label class="f">New password (10+ characters)<input type="password" id="pwNew" autocomplete="new-password" minlength="10" required></label>
+      <label class="f">Repeat new password<input type="password" id="pwNew2" autocomplete="new-password" minlength="10" required></label>
+      <div class="row" style="justify-content:flex-end;margin-top:10px">${forced ? '<button type="button" id="pwOut">Sign out</button>' : '<button type="button" id="pwCancel">Cancel</button>'}<button class="primary" type="submit">Save</button></div>
+    </form>`);
+  $('#modal').dataset.locked = forced ? '1' : '';
+  if ($('#pwCancel')) $('#pwCancel').onclick = closeModal;
+  if ($('#pwOut')) $('#pwOut').onclick = async () => { await api('POST', '/api/logout', {}); location.replace('/login.html'); };
+  $('#pwForm').onsubmit = async e => {
+    e.preventDefault();
+    if ($('#pwNew').value !== $('#pwNew2').value) return toast('The new passwords do not match', true);
+    const r = await api('POST', '/api/password', { old: $('#pwOld').value, new: $('#pwNew').value });
+    if (!r.ok) return toast(r.msg, true);
+    S.me.mustChange = false; $('#modal').dataset.locked = ''; closeModal(); toast('Password changed — other devices were signed out');
+  };
+}
+async function usersDialog() {
+  const r = await api('GET', '/api/users'); if (!r.ok) return;
+  const opts = sel => ROLES.map(x => `<option ${x === sel ? 'selected' : ''}>${x}</option>`).join('');
+  modal(`<h3>Users</h3>
+    <div>${r.users.map(u => `<div class="urow" data-u="${esc(u.username)}"><span class="nm">${esc(u.username)}${u.mustChange ? ' <span class="muted small">(temp password)</span>' : ''}</span>
+      <select data-role>${opts(u.role)}</select><button data-reset>New password</button><button data-del class="danger">Delete</button></div>`).join('')}</div>
+    <h3 style="margin-top:16px">Add user</h3>
+    <form id="addU" class="menu">
+      <label class="f">Username<input id="nuName" autocomplete="off" autocapitalize="off" required></label>
+      <label class="f">Temporary password (10+ characters — they must change it)<input id="nuPw" type="password" autocomplete="new-password" minlength="10" required></label>
+      <label class="f">Role<select id="nuRole">${opts('operator')}</select></label>
+      <p class="role-note">viewer: watch only · operator: run the HMI · engineer: program & configure · admin: + users</p>
+      <div class="row" style="justify-content:flex-end"><button type="button" id="uClose">Close</button><button class="primary" type="submit">Add user</button></div>
+    </form>`);
+  $('#uClose').onclick = closeModal;
+  $$('.urow').forEach(row => {
+    const name = row.dataset.u;
+    row.querySelector('[data-role]').onchange = async e => { const x = await api('POST', '/api/users', { username: name, role: e.target.value }); if (!x.ok) { toast(x.msg, true); usersDialog(); } else toast('Role updated'); };
+    row.querySelector('[data-del]').onclick = async () => {
+      if (row.dataset.confirm !== '1') { row.dataset.confirm = '1'; row.querySelector('[data-del]').textContent = 'Confirm delete'; return; }
+      const x = await api('POST', '/api/users/delete', { username: name }); if (!x.ok) toast(x.msg, true); usersDialog();
+    };
+    row.querySelector('[data-reset]').onclick = () => {
+      const b = row.querySelector('[data-reset]');
+      const inp = document.createElement('input'); inp.type = 'password'; inp.placeholder = 'temp password'; inp.autocomplete = 'new-password';
+      b.replaceWith(inp); inp.focus();
+      inp.onkeydown = async e => { if (e.key !== 'Enter') return; const x = await api('POST', '/api/users', { username: name, role: row.querySelector('[data-role]').value, password: inp.value }); toast(x.ok ? 'Password reset — they must change it at next sign-in' : x.msg, !x.ok); if (x.ok) usersDialog(); };
+    };
+  });
+  $('#addU').onsubmit = async e => {
+    e.preventDefault();
+    const x = await api('POST', '/api/users', { username: $('#nuName').value.trim(), password: $('#nuPw').value, role: $('#nuRole').value });
+    if (!x.ok) return toast(x.msg, true);
+    toast('User added'); usersDialog();
+  };
+}
 function modal(html) { $('#mbody').innerHTML = html; $('#modal').hidden = false; }
-function closeModal() { $('#modal').hidden = true; }
+function closeModal() { if ($('#modal').dataset.locked === '1') return; $('#modal').hidden = true; }
 $('#modal').onclick = e => { if (e.target.id === 'modal') closeModal(); };
 
 // ---------- program editor ----------
@@ -561,7 +644,7 @@ async function refreshProject(resetEditor) {
 function connect() {
   const es = new EventSource('/api/stream');
   es.onopen = () => { $('#conn').className = 'pill small ok'; $('#conn').title = 'Connected to the PLC'; };
-  es.onerror = () => { $('#conn').className = 'pill small bad'; $('#conn').title = 'Disconnected — retrying'; };
+  es.onerror = () => { $('#conn').className = 'pill small bad'; $('#conn').title = 'Disconnected — retrying'; api('GET', '/api/me').catch(() => {}); };
   es.onmessage = e => {
     const s = JSON.parse(e.data);
     S.snap = s;
@@ -587,6 +670,7 @@ function frame() {
 
 // ---------- boot ----------
 (async function boot() {
+  S.me = await api('GET', '/api/me');
   S.meta = await api('GET', '/api/meta');
   $('#scenSel').innerHTML = S.meta.scenarios.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   try { S.view = localStorage.getItem('plcf.view') || '3d'; } catch (e) {}
@@ -605,6 +689,8 @@ function frame() {
   try { tab = location.hash.slice(1) || localStorage.getItem('plcf.tab') || 'hmi'; } catch (e) {}
   if (!document.querySelector(`#tabs [data-t="${tab}"]`)) tab = 'hmi';
   setTab(tab);
+  applyRole();
+  if (S.me.mustChange) passwordDialog(true);
   requestAnimationFrame(frame);
   window.addEventListener('resize', () => HMI.layout());
 })();

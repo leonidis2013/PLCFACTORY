@@ -53,7 +53,43 @@ docker build -t ghcr.io/leonidis2013/plcfactory:latest . && docker compose up -d
 | `MODBUS` | on | Set to `off` to disable Modbus |
 | `DATA_DIR` | `/data` | Projects (`projects/<plant>.json`) and settings |
 
-There is no login. Run it on a trusted LAN.
+| `ADMIN_USER` / `ADMIN_PASSWORD` | `admin` / random | Initial admin account, used only when no users exist yet |
+| `TRUST_PROXY` | off | Set `true` behind a reverse proxy so client IPs and HTTPS are detected |
+| `COOKIE_SECURE` | auto | Force the `Secure` cookie flag |
+| `SESSION_DAYS` | `7` | Sign-in lifetime (sliding) |
+| `AUTH` | on | `off` disables sign-in. Only for an isolated LAN |
+
+## Security & users
+
+Sign-in is **on by default**. On first start the container creates an `admin` user. If `ADMIN_PASSWORD` isn't set, it prints a random temporary password in the container log. You're forced to change it at first sign-in.
+
+| Role | Can |
+|---|---|
+| **viewer** | Watch everything (HMI, plant, trends, alarms, program), change nothing |
+| **operator** | + operate the HMI and local control station, plant controls, acknowledge alarms |
+| **engineer** | + program/download, RUN/STOP, I/O config, HMI & alarm editing, forcing, fault injection, scenarios, import/export |
+| **admin** | + manage users (menu → your name → Manage users) |
+
+How it works:
+
+- Passwords are hashed with scrypt.
+- Sessions are random tokens in `HttpOnly; SameSite=Strict` cookies, and only token hashes are stored.
+- Sign-in is throttled: 5 failures per username or 20 per IP gives a 15-minute lock.
+- Changing a password signs out the user's other devices.
+- Write requests must be same-origin JSON (CSRF protection).
+- A strict Content-Security-Policy, `X-Frame-Options: DENY` and `nosniff` are set on every response.
+
+**Exposing it to the internet:**
+1. Put it behind HTTPS: Nginx Proxy Manager, Traefik, Caddy or a Cloudflare Tunnel. Set `TRUST_PROXY=true`.
+2. Forward **only the web port**. Never forward Modbus (502). Modbus/TCP has no authentication, so anyone who reaches it can read and write the PLC. Keep it on your LAN, or set `MODBUS=off`.
+3. Give people the lowest role they need.
+
+Locked out? Run this inside the container:
+
+```bash
+docker exec -it plcfactory node server/auth-cli.js list
+docker exec -it plcfactory node server/auth-cli.js reset admin 'a-new-long-password'
+```
 
 ## Development
 
@@ -68,6 +104,7 @@ node test/sim.js         # headless check: runs every example program against it
 server/
   index.js            HTTP API, Server-Sent Events, persistence, scan loop
   modbus.js           Modbus TCP server (FC 1,2,3,4,5,6,15,16)
+  auth.js             users, sessions, roles, login throttling (auth-cli.js = recovery)
   engine/compiler.js  Structured Text → closures; function blocks incl. PID
   engine/runtime.js   scan cycle, sensor/actuator layers, forces, alarms, history
   plants/*.js         physics models, I/O catalogues, example projects

@@ -6,10 +6,17 @@ services:
     restart: unless-stopped
     environment:
       - TZ=America/Chicago
+      # First start only: name/password for the initial admin. If ADMIN_PASSWORD is not set,
+      # a random temporary password is printed in the container log.
+      # - ADMIN_USER=admin
+      # - ADMIN_PASSWORD=change-me-please
+      # Behind an HTTPS reverse proxy / Cloudflare Tunnel: trust X-Forwarded-For/-Proto
+      # (correct client IPs for login lockout, Secure cookies). Only set when a proxy is in front.
+      # - TRUST_PROXY=true
       # - MODBUS=off          # disable the Modbus TCP server
     ports:
       - "8085:8080"   # web UI   -> http://<server>:8085
-      - "502:5020"    # Modbus TCP for SCADA clients
+      - "502:5020"    # Modbus TCP for SCADA clients — LAN ONLY, never port-forward (Modbus has no login)
     volumes:
       - plcfactory-data:/data   # projects + settings (Docker named volume)
 

@@ -63,7 +63,8 @@ button.mode{font-weight:700;min-width:86px;letter-spacing:.12em}
 button.mode.run{background:linear-gradient(#24603a,#1c4d2e);border-color:#3b8f57;color:#dff7e6}
 button.mode.stop{background:linear-gradient(#6a2326,#561b1e);border-color:#a3383c;color:#ffe3e4}
 #scanInfo{font-family:var(--mono);font-size:11.5px}
-#menuBtn{margin-left:auto;font-size:18px;padding:2px 10px}
+#userBtn{margin-left:auto}
+#menuBtn{font-size:18px;padding:2px 10px}
 #conn{padding:3px 7px} #conn.ok{color:var(--green)} #conn.bad{color:var(--red)}
 nav#tabs{position:sticky;top:55px;z-index:19;display:flex;overflow-x:auto;background:#101315;border-bottom:1px solid var(--line);scrollbar-width:none}
 nav#tabs button{border:0;border-radius:0;background:transparent;padding:10px 15px 8px;color:var(--muted);border-bottom:3px solid transparent;font:600 15px/1 var(--cond);letter-spacing:.1em}
@@ -309,3 +310,16 @@ th{color:var(--muted);font:600 12px var(--cond);letter-spacing:.12em;text-transf
 .prose li{margin:3px 0}
 .prose table td,.prose table th{font-size:13px}
 [hidden]{display:none!important}
+
+/* sign-in + users */
+.login-wrap{display:flex;justify-content:center;padding:8vh 14px}
+.login-card{width:100%;max-width:380px;border-left-color:var(--accent);padding:20px 22px;display:flex;flex-direction:column;gap:12px}
+.login-card label,.mbox label.f{display:flex;flex-direction:column;gap:4px;font:600 12px var(--cond);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.login-card input,.mbox label.f input,.mbox label.f select{font:15px var(--sans);text-transform:none;letter-spacing:0;color:var(--text);padding:8px 9px}
+.login-card button{padding:9px;font-size:16px}
+.login-err{background:#2a1214;border:1px solid #8f3236;border-left:4px solid var(--red);color:#ffc9c9;padding:6px 10px;font-size:13px}
+#userBtn{font:600 13px var(--cond);letter-spacing:.06em;text-transform:none;padding:3px 9px}
+#userBtn small{color:var(--accent);margin-left:5px;text-transform:uppercase;letter-spacing:.1em}
+.urow{display:grid;grid-template-columns:1fr 120px auto auto;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)}
+.urow .nm{font-family:var(--mono)}
+.role-note{font-size:12px;color:var(--muted);margin:4px 0 10px}
