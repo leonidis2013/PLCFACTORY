@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Simulation self-test
-        run: node test/sim.js
+        run: npm test
       - name: Read version
         id: v
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"

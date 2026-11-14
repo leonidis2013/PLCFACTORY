@@ -13,6 +13,7 @@ const plants = require('./plants');
 const modbus = require('./modbus');
 const { Auth, ROLES } = require('./auth');
 const { Access } = require('./access');
+const { Workspaces, kindOf } = require('./workspaces');
 const pkg = require('../package.json');
 
 const PORT = +process.env.PORT || 8080;
@@ -25,19 +26,7 @@ fs.mkdirSync(path.join(DATA, 'projects'), { recursive: true });
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 const settingsFile = path.join(DATA, 'settings.json');
 const settings = Object.assign({ scen: 'tank', scanMs: 50 }, readJson(settingsFile, {}));
-const projFile = id => path.join(DATA, 'projects', id + '.json');
-
-function defaultProject(id) { return normalizeProject(Object.assign({ scen: id, actFaults: {} }, plants[id].defaults())); }
-function loadProject(id) {
-  const p = readJson(projFile(id), null);
-  if (!p) return defaultProject(id);
-  const d = defaultProject(id);
-  if (p.pous === undefined && p.src === undefined) { p.pous = d.pous; p.types = d.types; p.globals = d.globals; }
-  for (const k of ['sensors', 'hmi', 'alarms', 'pens', 'actFaults']) if (p[k] === undefined) p[k] = d[k];
-  normalizeProject(p);
-  p.scen = id;
-  return p;
-}
+const wsm = new Workspaces(DATA, plants, log);
 let saveT = null;
 function writeSettings() {
   try { fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 1)); } catch (e) { log('Could not save settings: ' + e.message); }
@@ -46,8 +35,8 @@ function save() {
   clearTimeout(saveT);
   saveT = setTimeout(() => {
     try {
-      fs.writeFileSync(projFile(rt.project.scen), JSON.stringify(rt.project, null, 1));
-      Object.assign(settings, { scen: rt.project.scen, scanMs: rt.scanMs });
+      wsm.save(rt.project);
+      Object.assign(settings, { ws: rt.project.ws, scanMs: rt.scanMs });
       writeSettings();
     } catch (e) { log('Save failed: ' + e.message); }
   }, 300);
@@ -57,7 +46,18 @@ const access = new Access(settings.access, s => { settings.access = s; writeSett
 const auth = new Auth(DATA, log, access);
 const rt = new Runtime(plants);
 rt.scanMs = settings.scanMs;
-rt.load(loadProject(plants[settings.scen] ? settings.scen : 'tank'));
+{
+  const first = settings.ws || settings.scen || 'tank';
+  try { rt.load(wsm.load(wsm.valid(first) ? first : 'tank')); } catch (e) { log('Could not load workspace ' + first + ': ' + e.message); rt.load(wsm.fresh('tank')); }
+}
+function switchTo(ws) {
+  if (!wsm.valid(ws)) return { ok: false, msg: 'Unknown workspace' };
+  try { wsm.save(rt.project); } catch (e) { log('Save failed: ' + e.message); }
+  const r = rt.load(wsm.load(ws));
+  save();
+  return Object.assign({ ok: true, compiled: r.ok, ws }, r.ok ? {} : { msg: r.msg });
+}
+const inChallenge = () => !!(rt.project.challenge && !rt.project.challenge.done);
 
 // ---------- scan loop ----------
 let last = Date.now(), timer = null;
@@ -107,12 +107,17 @@ function body(req) {
     req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch (e) { bad(e); } });
   });
 }
+function wsTitle() {
+  const m = wsm.mission(rt.project, '-');
+  return m.kind === 'lesson' ? `Lesson ${m.index} · ${m.title}` : m.kind === 'challenge' ? `${m.id} · ${m.title}` : m.name;
+}
 function projectInfo() {
   const d = rt.def;
   return {
     version: pkg.version,
     scen: rt.project.scen,
-    project: rt.project,
+    ws: rt.project.ws, kind: kindOf(rt.project.ws), wsName: wsTitle(),
+    project: Object.assign({}, rt.project, { challenge: undefined }),
     loaded: rt.loaded,
     types: rt.typeList(),
     hasProgram: !!rt.program,
@@ -131,10 +136,12 @@ const PERM = {
   'POST /api/check': 'engineer', 'POST /api/download': 'engineer', 'PUT /api/source': 'engineer', 'POST /api/mode': 'engineer',
   'POST /api/scan': 'engineer', 'POST /api/force': 'engineer', 'PUT /api/sensors': 'engineer', 'PUT /api/actfaults': 'engineer',
   'PUT /api/sensorfault': 'engineer', 'PUT /api/hmitheme': 'engineer', 'PUT /api/hmi': 'engineer', 'PUT /api/alarms': 'engineer',
-  'POST /api/scenario': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
+  'POST /api/scenario': 'engineer', 'POST /api/workspace': 'engineer', 'POST /api/sandbox/new': 'engineer', 'POST /api/sandbox/delete': 'engineer',
+  'POST /api/sandbox/rename': 'engineer', 'PUT /api/layout': 'engineer', 'POST /api/grade': 'engineer', 'POST /api/hint': 'engineer', 'POST /api/solution': 'engineer',
+  'POST /api/challenge/replace': 'engineer', 'POST /api/challenge/submit': 'engineer', 'POST /api/progress/reset': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
   'GET /api/users': 'admin', 'GET /api/settings': 'admin', 'PUT /api/settings': 'admin', 'POST /api/users': 'admin', 'POST /api/users/delete': 'admin',
 };
-const PUBLIC = new Set(['/login.html', '/js/login.js', '/setup.html', '/js/setup.js', '/css/app.css', '/healthz', '/api/login', '/api/setup']);
+const PUBLIC = new Set(['/login.html', '/js/login.js', '/setup.html', '/js/setup.js', '/js/theme.js', '/css/app.css', '/healthz', '/api/login', '/api/setup']);
 function secHeaders(res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -169,16 +176,19 @@ const routes = {
   'POST /api/panel': b => { if (b.key in rt.panel) rt.panel[b.key] = !!b.value; return { ok: true }; },
   'POST /api/plant': (b, me) => {
     if (b.fault && !auth.can(me, 'engineer')) return { ok: false, msg: 'Fault injection needs the engineer role' };
+    if (b.fault && inChallenge()) return { ok: false, msg: 'Fault injection is disabled during a challenge' };
     const st = rt.st;
     if (b.fault) { st.faults[b.fault] = !!b.value; rt.log('SIM', `Process fault ${b.value ? 'ON' : 'off'}: ${b.fault}`); }
     else if (b.action && rt.def.doAction) { rt.def.doAction(st, b.action, b.value, rt); rt.log('SIM', `Plant: ${b.action}${b.value !== undefined ? ' = ' + b.value : ''}`); }
     return { ok: true };
   },
   'PUT /api/sensors': b => { const r = rt.setSensors(Array.isArray(b.sensors) ? b.sensors : []); save(); return r; },
-  'PUT /api/actfaults': b => { rt.project.actFaults = b.actFaults || {}; rt.log('SIM', 'Actuator faults updated'); rt.projVer++; save(); return { ok: true }; },
+  'PUT /api/actfaults': b => {
+    if (inChallenge()) return { ok: false, msg: 'Fault injection is disabled during a challenge' }; rt.project.actFaults = b.actFaults || {}; rt.log('SIM', 'Actuator faults updated'); rt.projVer++; save(); return { ok: true }; },
   'PUT /api/sensorfault': b => {
     const s = rt.project.sensors.find(x => x.id === b.id);
     if (!s) return { ok: false };
+    if (inChallenge()) return { ok: false, msg: 'Fault injection is disabled during a challenge' };
     s.fault = b.fault || 'none'; rt.log('SIM', `Sensor fault on ${s.tag}: ${s.fault}`); save(); return { ok: true };
   },
   'PUT /api/hmitheme': b => { rt.project.hmiTheme = b.theme === 'dark' ? 'dark' : 'hp'; rt.projVer++; save(); return { ok: true }; },
@@ -186,15 +196,63 @@ const routes = {
   'PUT /api/alarms': b => { rt.project.alarms = b.alarms || []; rt.alm = {}; rt.almVer++; rt.projVer++; save(); return { ok: true }; },
   'PUT /api/pens': b => { rt.project.pens = b.pens || []; save(); return { ok: true }; },
   'POST /api/ack': b => { rt.ack(b.id || 'all'); return { ok: true }; },
-  'POST /api/scenario': b => {
-    if (!plants[b.id]) return { ok: false, msg: 'unknown scenario' };
-    fs.writeFileSync(projFile(rt.project.scen), JSON.stringify(rt.project, null, 1));
-    const r = rt.load(loadProject(b.id)); save(); return r;
+  'POST /api/scenario': b => switchTo(String(b.id || '')),
+  'POST /api/workspace': b => switchTo(String(b.id || '')),
+  'GET /api/workspaces': (b, me) => Object.assign({ ok: true, current: rt.project.ws }, wsm.list(me.username)),
+  'GET /api/mission': (b, me) => Object.assign({ ok: true }, wsm.mission(rt.project, me.username)),
+  'GET /api/catalog': () => Object.assign({ ok: true }, require('./plants/sandbox').catalog()),
+  'POST /api/sandbox/new': b => { const ws = wsm.newSandbox(b.name, b.template); return switchTo(ws); },
+  'POST /api/sandbox/delete': b => {
+    const id = String(b.id || '');
+    if (id === rt.project.ws) switchTo('tank');
+    return { ok: wsm.deleteSandbox(id) };
   },
+  'POST /api/sandbox/rename': b => {
+    const name = String(b.name || '').trim().slice(0, 48);
+    if (!name) return { ok: false, msg: 'Name required' };
+    if (b.id === rt.project.ws) { rt.project.name = name; rt.projVer++; save(); return { ok: true }; }
+    if (kindOf(String(b.id)) !== 'sandbox' || !wsm.valid(b.id)) return { ok: false, msg: 'Unknown machine' };
+    const p = wsm.load(b.id); p.name = name; wsm.save(p); return { ok: true };
+  },
+  'PUT /api/layout': b => {
+    if (kindOf(rt.project.ws) !== 'sandbox') return { ok: false, msg: 'Only your own machines (sandbox) can be rebuilt' };
+    const r = rt.setLayout(b.layout || {});
+    if (Array.isArray(b.addSensorsFor) && b.addSensorsFor.length) {
+      const have = new Set(rt.project.sensors.map(s => s.tag.toUpperCase())), add = [];
+      for (const c of rt.project.layout.components) if (b.addSensorsFor.includes(c.id)) for (const s of rt.def.suggest(c)) {
+        if (have.has(s.tag.toUpperCase())) continue;
+        have.add(s.tag.toUpperCase()); add.push(Object.assign({ id: 's' + Date.now().toString(36) + add.length }, s));
+      }
+      if (add.length) Object.assign(r, rt.setSensors(rt.project.sensors.concat(add)), { added: add.map(s => s.tag) });
+    }
+    save(); return r;
+  },
+  'POST /api/grade': (b, me) => {
+    if (kindOf(rt.project.ws) !== 'lesson') return { ok: false, msg: 'Not a lesson' };
+    if (!rt.program) return { ok: false, msg: 'Download a program that compiles first' };
+    const r = wsm.gradeLesson(rt.project, me.username);
+    rt.log('LEARN', `Check: ${r.passed}/${r.total} objectives passed`);
+    save(); return r;
+  },
+  'POST /api/hint': () => { const r = wsm.hint(rt.project); save(); return r; },
+  'POST /api/solution': () => { const r = wsm.solution(rt.project); save(); return r; },
+  'POST /api/challenge/replace': b => {
+    const r = wsm.replace(rt.project, b.what);
+    if (r.ok) { rt.hidden = rt.project.challenge.hidden; rt.log('MAINT', `Replaced ${String(b.what).replace(/^s:/, 'sensor ').replace(/^a:/, 'actuator ')}`); }
+    save(); return { ok: r.ok, msg: r.msg };
+  },
+  'POST /api/challenge/submit': (b, me) => {
+    if (kindOf(rt.project.ws) !== 'challenge') return { ok: false, msg: 'Not a challenge' };
+    if (!rt.program) return { ok: false, msg: 'The PLC has no valid program' };
+    const r = wsm.submit(rt.project, me.username, String(b.cause || ''));
+    rt.log('MAINT', r.pass ? `Work order closed — score ${r.score}` : 'Work order rejected: the fault is still there');
+    save(); return r;
+  },
+  'POST /api/progress/reset': (b, me) => { wsm.resetProgress(me.username); return { ok: true }; },
   'POST /api/reset-project': b => {
-    const d = defaultProject(rt.project.scen);
+    const d = wsm.fresh(rt.project.ws);
     const keep = b.part && b.part !== 'all' ? b.part : null;
-    if (keep === 'src') { delete rt.project.draft; rt.download(unitsOf(d), false); rt.projVer++; }
+    if (keep === 'src') { delete rt.project.draft; rt.download(unitsOf(d), false); Object.assign(rt.project, unitsOf(d)); rt.projVer++; }
     else if (keep) { rt.project[keep] = d[keep]; if (keep === 'sensors') rt.setSensors(d.sensors); rt.projVer++; }
     else rt.load(d);
     save(); return { ok: true };
@@ -212,9 +270,13 @@ const routes = {
   'POST /api/users/delete': (b, me) => auth.remove(me, b),
   'POST /api/import': b => {
     const p = b.project;
-    if (!p || !plants[p.scen]) return { ok: false, msg: 'Not a PLCFACTORY project file' };
-    fs.writeFileSync(projFile(p.scen), JSON.stringify(p, null, 1));
-    const r = rt.load(loadProject(p.scen)); save(); return r;
+    if (!p || !(plants[p.scen] || p.scen === 'sandbox')) return { ok: false, msg: 'Not a PLCFACTORY project file' };
+    let ws = p.ws || p.scen;
+    if (p.scen === 'sandbox' && kindOf(ws) !== 'sandbox') ws = wsm.newSandbox(p.name || 'Imported machine');
+    if (kindOf(ws) === 'challenge') return { ok: false, msg: 'Challenge workspaces cannot be imported' };
+    p.ws = ws; delete p.challenge;
+    wsm.save(p);
+    return switchTo(ws);
   },
 };
 
@@ -238,7 +300,7 @@ const server = http.createServer(async (req, res) => {
     if (key === 'GET /api/setup') return send(res, 200, auth.setupInfo(req));
     if (key === 'POST /api/setup') { const r = auth.setup(req, res, await body(req)); return send(res, r.status, r.body); }
     if (auth.setupMode) {
-      if (url.pathname === '/setup.html' || url.pathname === '/js/setup.js' || url.pathname === '/css/app.css' || url.pathname === '/healthz') { /* serve below */ }
+      if (['/setup.html', '/js/setup.js', '/js/theme.js', '/css/app.css', '/healthz'].includes(url.pathname)) { /* serve below */ }
       else if (url.pathname.startsWith('/api/')) return send(res, 503, { ok: false, setup: true, msg: 'First-run setup is not finished' });
       else { res.writeHead(302, { Location: '/setup.html' }); return res.end(); }
     } else if (url.pathname === '/setup.html') { res.writeHead(302, { Location: '/' }); return res.end(); }
@@ -266,8 +328,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (key === 'GET /api/export') {
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="plcfactory-${rt.project.scen}.json"` });
-      return res.end(JSON.stringify(rt.project, null, 1));
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': `attachment; filename="plcfactory-${rt.project.ws}.json"` });
+      return res.end(JSON.stringify(Object.assign({}, rt.project, { challenge: undefined }), null, 1));
     }
     if (key === 'GET /healthz') return send(res, 200, { ok: true });
     if (routes[key]) {
@@ -291,6 +353,6 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(PORT, () => log(`PLCFACTORY ${pkg.version} on http://0.0.0.0:${PORT}  (data: ${DATA})`));
 
-const shutdown = () => { try { fs.writeFileSync(projFile(rt.project.scen), JSON.stringify(rt.project, null, 1)); } catch {} process.exit(0); };
+const shutdown = () => { try { wsm.save(rt.project); } catch {} process.exit(0); };
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

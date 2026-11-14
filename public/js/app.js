@@ -4,7 +4,7 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const PEN_COLORS = ['#3fa9f5', '#f5a623', '#2ecc71', '#e74c3c', '#b48cff', '#ff7fd0'];
+const PEN_COLORS = ['#2f7ff0', '#e8930c', '#1fa463', '#e0454b', '#8b5cf6', '#e255a8'];
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 const S = {
@@ -72,6 +72,7 @@ function fmtTag(t, v) {
 // ---------- tabs ----------
 function setTab(t) {
   if (t === 'plant' && matchMedia('(min-width:1150px)').matches) t = 'hmi';
+  if (document.body.dataset.tab !== t) window.scrollTo(0, 0);
   document.body.dataset.tab = t;
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
   try { localStorage.setItem('plcf.tab', t); } catch (e) {}
@@ -83,6 +84,8 @@ function setTab(t) {
   if (t === 'learn') $('#learn').innerHTML = LEARN.html(S.info, S.meta);
   if (t === 'program') renderProgram();
   if (t === 'settings') renderSettings();
+  if (t === 'mission') MODES.renderMission();
+  if (t === 'build') MODES.renderBuild();
 }
 $$('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
 
@@ -93,10 +96,24 @@ $('#runBtn').onclick = async () => {
   const r = await api('POST', '/api/mode', { mode: run ? 'STOP' : 'RUN' });
   if (r && r.ok === false) toast(r.msg, true);
 };
-$('#scenSel').onchange = async e => {
-  await api('POST', '/api/scenario', { id: e.target.value });
-  await refreshProject(true);
+$('#wsBtn').onclick = () => (document.body.classList.contains('home-open') ? MODES.closeHome() : MODES.openHome());
+// ---------- theme ----------
+const THEME_ICON = {
+  auto: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>',
+  light: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  dark: '<svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg>',
 };
+function themeChanged() {
+  const dark = PLCF_THEME.current() === 'dark';
+  window.GL3D_THEME = dark ? { bg: [0.075, 0.084, 0.098], floor: '#1b1f24', grid: '#252a31', mark: '#343c46' } : { bg: [0.925, 0.937, 0.95], floor: '#d9dee4', grid: '#c9d0d7', mark: '#b4bdc7' };
+  const pref = PLCF_THEME.get();
+  $('#themeBtn').innerHTML = THEME_ICON[pref]; $('#themeBtn').title = `Theme: ${pref === 'auto' ? 'follow system' : pref} (click to change)`;
+  const cs = getComputedStyle(document.documentElement);
+  S.trendCol = { grid: cs.getPropertyValue('--line').trim(), text: cs.getPropertyValue('--dim').trim() };
+}
+$('#themeBtn').onclick = () => { const n = PLCF_THEME.cycle(); toast(n === 'auto' ? 'Theme follows your system' : `${n[0].toUpperCase() + n.slice(1)} theme`); };
+window.addEventListener('plcf-theme', themeChanged);
+themeChanged();
 function updateHeader() {
   const s = S.snap; if (!s) return;
   const st = $('#plcStat');
@@ -116,18 +133,18 @@ $('#forceGo').onclick = e => { e.preventDefault(); setTab('tags'); };
 // ---------- menu ----------
 $('#menuBtn').onclick = () => {
   const m = S.info;
-  modal(`<h3>Project — ${esc(m.plant.name)}</h3>
+  modal(`<h3>Project — ${esc(m.wsName)}</h3>
     <div class="menu">
       <label class="row small">PLC cycle time
         <select id="mScan">${[10, 20, 50, 100, 200].map(v => `<option ${v === m.scanMs ? 'selected' : ''} value="${v}">${v} ms</option>`).join('')}</select></label>
       <a href="/api/export" download><button>⬇ Export project (.json)</button></a>
       <button id="mImport">⬆ Import project…</button><input type="file" id="mFile" accept=".json,application/json" hidden>
       <button id="mPlant">↺ Reset the plant (physics state)</button>
-      <p class="muted small" style="margin:14px 0 4px">Restore example content for this plant:</p>
+      ${m.kind === 'challenge' ? '' : `<p class="muted small" style="margin:14px 0 4px">${m.kind === 'lesson' ? 'Restore the lesson starting point:' : m.kind === 'sandbox' ? 'Clear parts of this machine project:' : 'Restore example content for this plant:'}</p>
       <div class="row">
         <button data-r="src">Program</button><button data-r="hmi">HMI</button><button data-r="sensors">I/O</button>
-        <button data-r="alarms">Alarms</button><button data-r="all" class="danger">Everything</button>
-      </div>
+        <button data-r="alarms">Alarms</button>${m.kind === 'sandbox' ? '' : '<button data-r="all" class="danger">Everything</button>'}
+      </div>`}
       <p class="muted small" style="margin-top:14px">PLCFACTORY ${esc(m.version)} · ${m.modbus ? 'Modbus TCP on port ' + m.modbus.port + ' (inside the container)' : 'Modbus off'}</p>
     </div><div class="row" style="justify-content:flex-end"><button id="mClose">Close</button></div>`);
   $('#mClose').onclick = closeModal;
@@ -143,7 +160,7 @@ $('#menuBtn').onclick = () => {
     const part = b.dataset.r;
     const ok = $('#mConfirm') || document.createElement('div');
     ok.id = 'mConfirm'; ok.className = 'row';
-    ok.innerHTML = `<span class="warn small">Replace your ${part === 'all' ? 'whole project' : part === 'src' ? 'program' : part} with the example?</span><button class="danger" id="mYes">Replace</button>`;
+    ok.innerHTML = `<span class="warn small">Replace your ${part === 'all' ? 'whole project' : part === 'src' ? 'program' : part} with the ${S.info.kind === 'lesson' ? 'lesson starting point' : S.info.kind === 'sandbox' ? 'machine template' : 'example'}?</span><button class="danger" id="mYes">Replace</button>`;
     b.parentElement.after(ok);
     $('#mYes').onclick = async () => { await api('POST', '/api/reset-project', { part }); closeModal(); await refreshProject(true); toast('Restored'); };
   });
@@ -494,7 +511,8 @@ $('#coldBtn').onclick = () => download(true);
 $('#chkBtn').onclick = async () => { const r = await api('POST', '/api/check', canonUnits(S.units)); showErr(r); toast(r.ok ? `No errors (${r.vars} variables)` : 'Errors found', !r.ok); };
 $('#revertBtn').onclick = () => { S.units = JSON.parse(S.info.loaded); S.editorDirty = false; saveDraft(); showErr({ ok: true }); renderProgram(); };
 $('#exampleBtn').onclick = () => {
-  modal(`<h3>Load the example program?</h3><p class="muted">This replaces the data types, globals and all programs with this plant's example, and downloads it.</p>
+  const what = { lesson: 'the lesson starter program', challenge: 'the program as it was when the work order was raised', sandbox: 'the program of the machine template' }[S.info.kind] || "this plant's example program";
+  modal(`<h3>Restore ${what}?</h3><p class="muted">This replaces the data types, globals and all programs, and downloads it.</p>
     <div class="row" style="justify-content:flex-end"><button id="xNo">Cancel</button><button id="xYes" class="primary">Load example</button></div>`);
   $('#xNo').onclick = closeModal;
   $('#xYes').onclick = async () => {
@@ -533,9 +551,12 @@ $$('.panel [data-pb]').forEach(el => {
 });
 function buildPlantControls() {
   const p = S.info.plant;
-  $('#plantName').textContent = p.name;
+  $('#plantName').textContent = S.info.kind === 'sandbox' ? (S.info.project.name || 'My machine') : S.info.kind === 'lesson' ? 'Lesson machine' : p.name;
+  const sb = S.info.scen === 'sandbox';
+  $('#fixedPanel').hidden = sb; $('#sbPanel').hidden = !sb; $('#sbPanel')._k = null;
   $('#plantActions').innerHTML = (p.actions || []).map(a => {
     if (a.kind === 'toggle') return `<label><input type="checkbox" data-act="${a.id}"> ${esc(a.label)}</label>`;
+    if (a.kind === 'level') return `<label>${esc(a.label)} <input type="range" min="0" max="100" step="1" data-act="${a.id}" style="width:110px"> %</label>`;
     if (a.kind === 'select') return `<label>${esc(a.label)} <select data-act="${a.id}">${a.options.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>`;
     return `<button data-act="${a.id}">${esc(a.label)}</button>`;
   }).join('');
@@ -543,7 +564,7 @@ function buildPlantControls() {
   $$('#plantActions [data-act]').forEach(el => {
     const id = el.dataset.act;
     if (el.tagName === 'BUTTON') el.onclick = () => api('POST', '/api/plant', { action: id });
-    else el.onchange = () => api('POST', '/api/plant', { action: id, value: el.type === 'checkbox' ? el.checked : el.value });
+    else el.onchange = () => api('POST', '/api/plant', { action: id, value: el.type === 'checkbox' ? el.checked : el.type === 'range' ? +el.value : el.value });
   });
   $$('#plantFaults [data-fault]').forEach(el => el.onchange = () => api('POST', '/api/plant', { fault: el.dataset.fault, value: el.checked }));
 }
@@ -556,12 +577,13 @@ function syncPlantControls(v) {
   $$('#plantFaults [data-fault]').forEach(el => { el.checked = !!(v.faults || {})[el.dataset.fault]; });
 }
 function plantCtx() {
-  return { val: App.val, out: S.snap.out, sensors: S.info.project.sensors, t: performance.now() / 1000, info: S.info, tags: S.snap.tags };
+  return { val: App.val, out: S.snap.out, sensors: S.info.project.sensors, t: performance.now() / 1000, info: S.info, tags: S.snap.tags, theme: PLCF_THEME.current() };
 }
 let last2d = 0;
 function renderPlant() {
   const s = S.snap, v = s.plant, id = S.info.scen;
-  if (s.scen !== id) return;   // snapshot from before a scenario switch
+  if (s.ws !== S.info.ws) return;   // snapshot from before a workspace switch
+  if (id === 'sandbox') return renderSandbox(s, v);
   $('#lampRun').classList.toggle('on', !!App.val('Q_RunLamp'));
   $('#lampFault').classList.toggle('on', !!App.val('Q_FaultLamp'));
   $('.estop').classList.toggle('down', !!s.panel.estop);
@@ -584,6 +606,29 @@ function renderPlant() {
   } else {
     const now = performance.now();
     if (now - last2d > 66) { last2d = now; $('#view2d').innerHTML = SCENES2D[id](v, plantCtx()); }
+  }
+}
+
+function renderSandbox(s, v) {
+  const ctx = plantCtx();
+  const msgs = v.msgs || [], mk = msgs.join('|');
+  if ($('#plantMsgs')._k !== mk) { $('#plantMsgs').innerHTML = msgs.map(m => `<div>${esc(m)}</div>`).join(''); $('#plantMsgs')._k = mk; }
+  if ($('#score')._k !== '') { $('#score').innerHTML = ''; $('#score')._k = ''; }
+  SBX.panel($('#sbPanel'), v.layout, v, ctx, (action, value) => api('POST', '/api/plant', { action, value }));
+  syncPlantControls(v);
+  const camKey = S.info.ws + JSON.stringify(SBX.cam(v.layout));
+  if (S.view === '3d') {
+    if (!S.renderer) {
+      S.renderer = new GL3D.Renderer($('#glc'), $('#glLabels'));
+      if (S.renderer.failed) { $('#view3d').innerHTML = '<p class="muted" style="padding:20px">WebGL is not available in this browser — use the 2D view.</p>'; return; }
+      S.renderer.attachControls();
+    }
+    if (S.camScen !== camKey) { S.renderer.setHome(SBX.cam(v.layout)); S.camScen = camKey; }
+    const sc3 = SBX.scene3d(v, ctx);
+    S.renderer.draw(sc3.objs, sc3.labels);
+  } else {
+    const now = performance.now();
+    if (now - last2d > 66) { last2d = now; $('#view2d').innerHTML = SBX.plan(v.layout, v, ctx); }
   }
 }
 
@@ -764,7 +809,8 @@ function drawTrend(cv, pens, winS, opts = {}) {
   const h = S.hist, n = h.t.length; if (!n) return;
   const tEnd = S.trendPaused ? h.t[n - 1] : Math.max(h.t[n - 1], Date.now() - 150), t0 = tEnd - winS * 1000;
   const L = opts.compact ? 4 : 8, R = W - (opts.compact ? 4 : 8), T = 6, B = H - (opts.compact ? 4 : 18);
-  g.strokeStyle = opts.light ? '#c9ced3' : '#20262b'; g.lineWidth = 1; g.font = '11px "IBM Plex Mono", monospace'; g.fillStyle = opts.light ? '#69727a' : '#5f6870';
+  const tc = S.trendCol || { grid: '#e4e7eb', text: '#8b949e' };
+  g.strokeStyle = opts.light ? '#c9ced3' : opts.dark ? '#20262b' : tc.grid; g.lineWidth = 1; g.font = '11px "JetBrains Mono", monospace'; g.fillStyle = opts.light ? '#69727a' : opts.dark ? '#5f6870' : tc.text;
   for (let i = 0; i <= 4; i++) { const y = T + (B - T) * i / 4; g.beginPath(); g.moveTo(L, y); g.lineTo(R, y); g.stroke(); }
   const step = winS <= 30 ? 5 : winS <= 60 ? 10 : 20;
   for (let s = 0; s <= winS; s += step) { const x = R - (R - L) * s / winS; g.beginPath(); g.moveTo(x, T); g.lineTo(x, B); g.stroke(); if (!opts.compact) g.fillText(`-${s}s`, x - 12, H - 4); }
@@ -848,13 +894,26 @@ function updateTags() {
 }
 
 // ---------- project ----------
-async function refreshProject(resetEditor) {
-  if (S.refreshing) return; S.refreshing = true;
+function refreshProject(resetEditor) {
+  // serialise: a refresh requested while one is running runs again afterwards (with the strongest reset)
+  if (S.refreshP) { S.again = true; S.againReset = S.againReset || !!resetEditor; return S.refreshP; }
+  S.refreshP = (async () => {
+    let reset = resetEditor;
+    for (;;) {
+      await doRefresh(reset);
+      if (!S.again) break;
+      reset = S.againReset; S.again = false; S.againReset = false;
+    }
+  })().finally(() => { S.refreshP = null; });
+  return S.refreshP;
+}
+async function doRefresh(resetEditor) {
+  S.refreshing = true;
   try {
-    const prevScen = S.info && S.info.scen;
+    const prevWs = S.info && S.info.ws;
     S.info = await api('GET', '/api/project');
-    const scenChanged = prevScen !== S.info.scen;
-    $('#scenSel').value = S.info.scen;
+    const scenChanged = prevWs !== S.info.ws;
+    MODES.onProject(scenChanged);
     if (resetEditor || scenChanged || !S.units || (!S.editorDirty && document.activeElement !== code && !$('#ldEditor').contains(document.activeElement))) {
       S.units = unitsFromInfo();
       if (scenChanged || resetEditor) S.cur = S.units.pous[0] ? S.units.pous[0].id : 'globals';
@@ -863,7 +922,11 @@ async function refreshProject(resetEditor) {
     } else { S.editorDirty = isDirty(); renderTypeList(); }
     HMI.setTheme(S.info.project.hmiTheme || 'hp');
     if (scenChanged) { S.hist = { t: [], v: {} }; S.ioDirty = false; buildPlantControls(); HMI.load(S.info.project.hmi); }
-    else HMI.load(S.info.project.hmi, true);
+    else {
+      HMI.load(S.info.project.hmi, true);
+      if (S.info.scen === 'sandbox' && S.plantKey !== JSON.stringify(S.info.plant.actions)) buildPlantControls();
+    }
+    S.plantKey = JSON.stringify(S.info.plant.actions);
     progStatus();
     renderIoChips();
     const tab = document.body.dataset.tab;
@@ -902,13 +965,13 @@ function frame() {
   if (tab === 'trend') updateTrendTab();
   if (tab === 'alarms') renderAlarms();
   if (tab === 'io') updateIoLive();
+  if (tab === 'mission') MODES.tick();
 }
 
 // ---------- boot ----------
 (async function boot() {
   S.me = await api('GET', '/api/me');
   S.meta = await api('GET', '/api/meta');
-  $('#scenSel').innerHTML = S.meta.scenarios.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   try { S.view = localStorage.getItem('plcf.view') || '3d'; } catch (e) {}
   $$('.seg button').forEach(x => x.classList.toggle('on', x.dataset.v === S.view));
   $('#view3d').hidden = S.view !== '3d'; $('#view2d').hidden = S.view !== '2d';
@@ -921,11 +984,12 @@ function frame() {
     for (const K in h.v) S.hist.v[K] = new Array(Math.max(0, h.t.length - h.v[K].length)).fill(null).concat(h.v[K]);
   } catch (e) {}
   connect();
-  let tab = 'hmi';
-  try { tab = location.hash.slice(1) || localStorage.getItem('plcf.tab') || 'hmi'; } catch (e) {}
-  if (!document.querySelector(`#tabs [data-t="${tab}"]`)) tab = 'hmi';
+  let tab = MODES.defaultTab(), seen = false;
+  try { tab = location.hash.slice(1) || localStorage.getItem('plcf.tab') || tab; seen = !!localStorage.getItem('plcf.seenHome'); } catch (e) {}
+  if (!document.querySelector(`#tabs [data-t="${tab}"]`) || (tab === 'mission' && !['lesson', 'challenge'].includes(S.info.kind)) || (tab === 'build' && S.info.kind !== 'sandbox')) tab = MODES.defaultTab();
   setTab(tab);
   applyRole();
+  if (!seen) MODES.openHome();
   if (S.me.mustChange) passwordDialog(true);
   requestAnimationFrame(frame);
   window.addEventListener('resize', () => HMI.layout());

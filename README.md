@@ -1,8 +1,19 @@
 # PLCFACTORY
 
-A self-hosted **PLC & SCADA training simulator** in Docker, with an industrial engineering-station look (graphite + safety yellow, blueprint schematics). You write IEC 61131-3 **Structured Text**, build an **HMI**, set up the plant's **sensors**, and watch virtual equipment react in **3D** (or 2D).
+A self-hosted **PLC & SCADA training simulator** in Docker. You write IEC 61131-3 **Structured Text** or **Ladder**, build an **HMI**, set up the plant's **sensors**, and watch virtual equipment react in **3D** (or 2D). It has four ways to learn: a graded **lesson path**, timed **troubleshooting** work orders, a **sandbox** where you build your own machines, and four complete **practice plants**. The interface is a clean engineering IDE with light and dark themes (it follows your system setting).
 
 The soft PLC and the plant physics run on the server 24/7, so every browser you connect sees the same live PLC: a tablet HMI and a laptop engineering station at once. A built-in **Modbus TCP server** lets real SCADA software (Ignition, FUXA, Node-RED, Codesys…) connect to the simulated PLC.
+
+## Modes
+
+| Mode | What you do |
+|---|---|
+| **Learn** | 15 lessons that follow a typical industrial PLC certification syllabus: I/O and the scan, NC fail-safe wiring, seal-in, interlocks, TON/TOF/CTU, edge detection, 4–20 mA scaling, hysteresis, CASE sequencers, ISA-18.2 alarm handling, shift-register tracking, UDT arrays and PID. Each lesson has its own machine, background theory, a task, hints and a reference solution. **Check my program** grades the downloaded program in a fast-forward copy of the simulation, with objectives like "Stop wins when both buttons are pressed" or "FWD and REV are never on together". |
+| **Troubleshoot** | 10 work orders on the practice plants, each with a planted fault: a failed sensor, a stuck valve, a wrong contact type, a bad scaling setting, a mis-mounted photoeye, a program bug or a badly tuned loop. Investigate with trends, tags and the I/O view, replace parts or fix the configuration or code, then close the work order with the root cause. Score: 1000 minus time over par, hints, unneeded part replacements, a wrong root cause and rejected attempts. |
+| **Build** | A sandbox machine builder. Drag tanks, on/off and control valves, pumps (optionally VFD), heaters (optionally SCR), motors (reversing, VFD, overload relay), conveyors with part feeders, pneumatic pushers/stoppers, pushbuttons, selector switches, E-stops, potentiometers, pilot lights and stack lights onto a plan. **Apply** generates the PLC outputs and sensor signals, and can add typical sensors automatically. The 3D and 2D views are generated from your layout. |
+| **Practice** | The four complete plants below, with example programs, HMIs and alarms. |
+
+Progress is kept per user in `/data/progress.json`.
 
 ## Features
 
@@ -11,7 +22,7 @@ The soft PLC and the plant physics run on the server 24/7, so every browser you 
 | **Soft PLC** | **Structured Text** and **Ladder Diagram** programs in one project (Data types → Globals → ordered programs). **UDTs** (`TYPE … STRUCT`), `ARRAY[..] OF` (including arrays of UDTs), member/index/bit access, **shift registers** (`BSL`/`BSR` on any array, `SHL`/`SHR`/`ROL`/`ROR`), bitwise logic. Compiler: `IF/ELSIF/CASE/FOR/WHILE/REPEAT`, BOOL/INT/DINT/REAL/TIME. Function blocks `TON TOF TP CTU CTD CTUD R_TRIG F_TRIG SR RS PID`. Warm/cold download, RUN/STOP/FAULT, watchdog, configurable cycle time, line-numbered compile errors. |
 | **PID** | Ideal-form PID FB with anti-windup, derivative-on-measurement, bumpless auto/manual, reverse acting and P/I/D term outputs. Comes with an HMI **PID faceplate** for live tuning and a tuning guide (step test, lambda, Ziegler–Nichols). |
 | **Flexible sensors** | The I/O tab builds the sensor list from the plant's physical measurements. Analog transmitters (engineering units, **4–20 mA** or **raw 0–27648**, range, noise), switches (SP, hysteresis, NO/NC), discrete contacts (limit switches, valve ZSO/ZSC), and position sensors placed anywhere along a line. |
-| **Fault injection** | Per sensor: stuck, drift, noisy, fail low/high, wire break. Per actuator: stuck on/off. Plus process faults for each plant (lost supply, glove breach, contamination…). |
+| **Fault injection** | Per sensor: stuck, drift, noisy, fail low/high, wire break. Per actuator: stuck on/off. Plus process faults for each plant (lost supply, glove breach, contamination…). Hidden faults are used by troubleshooting work orders, where fault injection is locked. |
 | **HMI builder** | Drag-and-drop editor on an 800×480 canvas: buttons, switches, lamps, values, setpoints, bars, motors, valves, PID faceplates, mini-trends, alarm banner. Two screen styles: **ISA-101 high-performance** (gray, colour only for abnormal states, as used in real plants) or **dark control room**. Full-screen mode for a tablet. |
 | **SCADA** | Alarms (priorities, ack, return-to-normal), event log, 6-pen trend with per-pen scaling, tag browser with write and **force**. |
 | **3D / 2D plant views** | Custom WebGL renderer with no external libraries, so it works offline. Orbit, pinch-zoom and pan, with live labels. |
@@ -23,7 +34,7 @@ The soft PLC and the plant physics run on the server 24/7, so every browser you 
 3. **Aseptic vial filler (isolator).** Indexing belt, fill-to-weight load cell, stopper press and reject kicker inside a Grade A isolator. Includes HEPA laminar flow, ΔP, particle counting and a VHP (H₂O₂) decontamination cycle. Every vial is graded on whether it was truly sterile, in spec and stoppered.
 4. **Bioreactor / fermenter.** Jacketed 70 L stirred tank with 9 automated valves (media, inoculum, harvest, drain, steam, jacket hot/cold, sparge air, vent), 4 dosing pumps, agitator and air MFC. Models steam-in-place with real steam/air headspace pressure (and the vacuum-on-cooldown contamination trap), Monod growth, DO, pH and foam.
 
-Each plant ships with a working example program, HMI, sensor list and alarm set, plus exercises in the **Learn** tab.
+Each plant ships with a working example program, HMI, sensor list and alarm set, plus reference material and exercises in the **Reference** tab.
 
 ## Install
 
@@ -73,7 +84,7 @@ Sign-in is **on by default**.
 |---|---|
 | **viewer** | Watch everything (HMI, plant, trends, alarms, program), change nothing |
 | **operator** | + operate the HMI and local control station, plant controls, acknowledge alarms |
-| **engineer** | + program/download, RUN/STOP, I/O config, HMI & alarm editing, forcing, fault injection, scenarios, import/export |
+| **engineer** | + program/download, RUN/STOP, I/O config, HMI & alarm editing, forcing, fault injection, switching lessons/challenges/machines, building machines, grading, import/export |
 | **admin** | + manage users (menu → your name → Manage users) |
 
 How it works:
@@ -112,7 +123,8 @@ There are no dependencies: Node 18+ is all you need.
 
 ```bash
 node server/index.js     # http://localhost:8080  (data in ./data)
-node test/sim.js         # headless check: runs every example program against its plant
+npm test                 # example programs, language self-test, every lesson (solution passes,
+                         # starter fails) and every work order (broken fails, repaired passes)
 ```
 
 ```
@@ -123,12 +135,19 @@ server/
   access.js           external-access settings: proxy trust, hosts, cookies, Modbus exposure
   engine/compiler.js  Structured Text → closures; UDTs, arrays, function blocks incl. PID
   engine/ladder.js    Ladder rungs → Structured Text
-  engine/runtime.js   scan cycle, sensor/actuator layers, forces, alarms, history
+  engine/runtime.js   scan cycle, sensor/actuator layers, forces, hidden faults, alarms, history
+  engine/grader.js    fast-forward test harness used to grade lessons and work orders
+  workspaces.js       modes: practice plants, lessons, challenges, sandbox machines; progress
+  curriculum/         lessons.js (15 graded lessons), challenges.js (10 work orders)
   plants/*.js         physics models, I/O catalogues, example projects
+  plants/sandbox.js   component-based machines (layout → plant model)
 public/
   js/ld.js            ladder editor + live power flow
   index.html, css/app.css
   js/app.js           engineering station (editor, I/O, alarms, trend, tags)
+  js/modes.js         home screen, mission panel (lessons + work orders), build tab
+  js/sandbox.js       sandbox 3D/2D views, operator panel, machine builder
+  js/theme.js         light/dark theme (follows the system by default)
   js/hmi.js           HMI runtime + builder
   js/gl.js            WebGL renderer
   js/scenes3d.js      3D plant scenes

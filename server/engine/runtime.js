@@ -5,6 +5,7 @@
  */
 const C = require('./compiler');
 const LD = require('./ladder');
+const { makeSandbox, normalizeLayout } = require('../plants/sandbox');
 const { truthy, num, coerce, defVal, ELEM } = C;
 
 const PANEL_SIGNALS = {
@@ -51,8 +52,12 @@ class Runtime {
   }
 
   // ---------- project / scenario ----------
+  resolveDef(project) {
+    if (project.scen === 'sandbox') { project.layout = normalizeLayout(project.layout).layout; return makeSandbox(project.layout); }
+    return this.plants[project.scen];
+  }
   load(project) {
-    const def = this.plants[project.scen];
+    const def = this.resolveDef(project);
     if (!def) throw new Error('Unknown scenario ' + project.scen);
     this.def = def;
     this.project = project;
@@ -60,6 +65,7 @@ class Runtime {
     this.plc = 'STOP'; this.fault = '';
     this.forces = {};
     this.alm = {}; this.sensorRt = {};
+    this.hidden = Object.assign({ sensors: {}, acts: {} }, (project.challenge && project.challenge.hidden) || {});
     this.hist = { t: [], v: {} };
     this.buildIo();
     normalizeProject(project);
@@ -107,6 +113,28 @@ class Runtime {
       case 'probe': return `${lab} at ${s.pos} mm (${s.contact})`;
       default: return `${lab} (${s.contact})`;
     }
+  }
+
+  /** Sandbox: replace the machine layout, keeping the state of components that still exist. */
+  setLayout(raw) {
+    const { layout, errors } = normalizeLayout(raw);
+    const old = this.st, oldLayout = this.project.layout;
+    this.project.layout = layout;
+    this.def = makeSandbox(layout);
+    const st = this.def.create();
+    if (old && old.c && oldLayout) {
+      const oldTypes = Object.fromEntries((oldLayout.components || []).map(c => [c.id, c.type]));
+      for (const c of layout.components) if (old.c[c.id] && oldTypes[c.id] === c.type) Object.assign(st.c[c.id], old.c[c.id]);
+      st.faults = old.faults || {};
+    }
+    this.st = st;
+    this.sensorRt = {};
+    this.buildIo();
+    const r = this.download(unitsOf(this.project), true);
+    if (!r.ok && this.plc === 'RUN') this.setMode('STOP');
+    this.log('SYS', 'Machine layout changed' + (r.ok ? '' : ' — program no longer compiles, PLC stopped'));
+    this.projVer++;
+    return Object.assign(r, { layoutErrors: errors });
   }
 
   setSensors(sensors) {
@@ -230,7 +258,7 @@ class Runtime {
       const tag = this.io[(s.tag || '').toUpperCase()];
       if (!tag) continue;
       const rt = this.sensorRt[s.id] || (this.sensorRt[s.id] = { state: false, drift: 0, last: null });
-      const fault = s.fault || 'none';
+      const fault = this.hidden.sensors[(s.tag || '').toUpperCase()] || s.fault || 'none';
       if (s.type === 'analog') {
         const lo = +s.lo, hi = +s.hi, span = (hi - lo) || 1;
         let v = num(this.sig(s.signal));
@@ -284,7 +312,7 @@ class Runtime {
     for (const [name, type] of this.def.actuators) {
       const t = this.io[name.toUpperCase()];
       let v = t.v;
-      const f = af[name];
+      const f = this.hidden.acts[name] || af[name];
       if (f === 'stuck_off') v = type === 'BOOL' ? false : 0;
       else if (f === 'stuck_on') v = type === 'BOOL' ? true : 100;
       out[name] = v;
@@ -439,7 +467,7 @@ class Runtime {
   snapshot() {
     const tv = this.tagValues();
     return {
-      scen: this.project.scen, plc: this.plc, fault: this.fault, scanTime: this.scanTime, scanMs: this.scanMs, scanCount: this.scanCount,
+      scen: this.project.scen, ws: this.project.ws, plc: this.plc, fault: this.fault, scanTime: this.scanTime, scanMs: this.scanMs, scanCount: this.scanCount,
       tags: tv.v, fb: tv.fb, forces: this.forces, panel: this.panel,
       out: this.outputs(),
       plant: this.def.view(this.st), alarms: this.alarmList(),

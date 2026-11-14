@@ -14,13 +14,14 @@ const SCENES3D = (() => {
   const fx = (v, d = 1) => (v === undefined || v === null ? '—' : typeof v === 'boolean' ? (v ? 'ON' : 'OFF') : (+v).toFixed(d));
 
   function floor(objs, w = 14, d = 10) {
-    objs.push(box([0, -0.05, 0], [w, 0.1, d], '#2a2e31'));                 // sealed concrete
-    for (let i = -Math.floor(w / 2); i <= w / 2; i++) objs.push(box([i, 0.002, 0], [0.01, 0.004, d], '#33383c'));
-    for (let j = -Math.floor(d / 2); j <= d / 2; j++) objs.push(box([0, 0.002, j], [w, 0.004, 0.01], '#33383c'));
-    // yellow safety walkway marking around the equipment zone
-    const zw = 7.4, zd = 3.4, t = 0.07;
-    for (const z of [-zd / 2, zd / 2]) objs.push(box([0, 0.004, z], [zw, 0.006, t], '#d9a404'));
-    for (const x of [-zw / 2, zw / 2]) objs.push(box([x, 0.004, 0], [t, 0.006, zd], '#d9a404'));
+    const T = window.GL3D_THEME || {};
+    objs.push(box([0, -0.05, 0], [w, 0.1, d], T.floor || '#1d2126'));
+    for (let i = -Math.floor(w / 2); i <= w / 2; i++) objs.push(box([i, 0.002, 0], [0.008, 0.004, d], T.grid || '#272c32'));
+    for (let j = -Math.floor(d / 2); j <= d / 2; j++) objs.push(box([0, 0.002, j], [w, 0.004, 0.008], T.grid || '#272c32'));
+    // walkway marking around the equipment zone
+    const zw = 7.4, zd = 3.4, t = 0.04;
+    for (const z of [-zd / 2, zd / 2]) objs.push(box([0, 0.004, z], [zw, 0.006, t], T.mark || '#3a4552'));
+    for (const x of [-zw / 2, zw / 2]) objs.push(box([x, 0.004, 0], [t, 0.006, zd], T.mark || '#3a4552'));
   }
   function valve3d(objs, p, pos, axis = 'x', size = 0.12) {
     const c = mix(OFF, ON, pos);
@@ -334,7 +335,7 @@ const SCENES3D = (() => {
   }
 
   return {
-    tank, conveyor, vialfiller, bioreactor,
+    tank, conveyor, vialfiller, bioreactor, floor,
     cam: {
       tank: { yaw: 0.55, pitch: 0.38, dist: 7.2, target: [0, 1.4, 0] },
       conveyor: { yaw: 0.3, pitch: 0.55, dist: 4.3, target: [0.1, 0.6, 0.1] },

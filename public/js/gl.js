@@ -127,7 +127,7 @@ const GL3D = (() => {
       const gl = this.gl, L = this.loc;
       const [w, h] = this.resize();
       gl.viewport(0, 0, this.cv.width, this.cv.height);
-      gl.clearColor(0.085, 0.095, 0.105, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      const bg = (window.GL3D_THEME && GL3D_THEME.bg) || [0.07, 0.08, 0.095]; gl.clearColor(bg[0], bg[1], bg[2], 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       const eye = this.eye();
       const VP = M.mul(M.persp(0.8, w / Math.max(h, 1), 0.05, 100), M.lookAt(eye, this.cam.target, [0, 1, 0]));
       this.VP = VP; this.wh = [w, h];

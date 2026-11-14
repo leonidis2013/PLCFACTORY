@@ -117,7 +117,7 @@ const HMI = (() => {
         break;
       }
       case 'motor': {
-        el.innerHTML = `<svg viewBox="0 0 100 80"><circle cx="50" cy="40" r="28"/><text x="50" y="49" text-anchor="middle" font-size="26" font-weight="700" font-family="Barlow Condensed, Arial Narrow, sans-serif">M</text></svg><div class="lbl">${esc(w.label || w.tag)}</div>`;
+        el.innerHTML = `<svg viewBox="0 0 100 80"><circle cx="50" cy="40" r="28"/><text x="50" y="49" text-anchor="middle" font-size="26" font-weight="700" font-family="Inter, system-ui, sans-serif">M</text></svg><div class="lbl">${esc(w.label || w.tag)}</div>`;
         upd = () => { const v = T(w); el.classList.toggle('on', truthy(v)); el.classList.toggle('bad', v === undefined); };
         break;
       }

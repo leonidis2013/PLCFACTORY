@@ -3,25 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#0d0f11">
+<meta name="theme-color" content="#f6f7f9">
+<script src="js/theme.js"></script>
 <title>PLCFACTORY</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171a1d'/%3E%3Crect x='5' y='7' width='22' height='18' fill='none' stroke='%23f2b705' stroke-width='2'/%3E%3Crect x='9' y='12' width='3' height='8' fill='%23f2b705'/%3E%3Crect x='14.5' y='12' width='3' height='8' fill='%23f2b705'/%3E%3Crect x='20' y='12' width='3' height='8' fill='%23f2b705'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f62e6'/%3E%3Crect x='8' y='10' width='11' height='3' rx='1.5' fill='white'/%3E%3Crect x='13' y='19' width='11' height='3' rx='1.5' fill='white'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body data-tab="program">
 <header id="top">
-  <div class="brand"><span class="mark"></span><span>PLC<b>FACTORY</b></span><small class="hide-s">SOFT PLC · SCADA TRAINER</small></div>
-  <select id="scenSel" title="Plant / scenario" data-min="engineer"></select>
+  <div class="brand"><span class="mark"></span><span>PLC<b>FACTORY</b></span></div>
+  <button id="wsBtn" title="Switch lesson, challenge, machine or plant"></button>
   <button id="runBtn" class="mode" data-min="engineer">RUN</button>
   <span id="plcStat" class="pill"><i></i><span>—</span></span>
   <span id="scanInfo" class="muted small hide-s"></span>
   <span id="conn" class="pill small" title="Connection to the PLC server">●</span>
   <button id="userBtn" class="ghost" title="Account"></button>
+  <button id="themeBtn" class="ghost" title="Theme"></button>
   <button id="menuBtn" class="ghost" title="Project">⋯</button>
 </header>
 <nav id="tabs">
+  <button data-t="mission">Mission</button>
+  <button data-t="build">Build</button>
   <button data-t="plant">Plant</button>
   <button data-t="program">Program</button>
   <button data-t="hmi">HMI</button>
@@ -29,12 +33,17 @@
   <button data-t="alarms">Alarms <span id="almBadge" class="badge"></span></button>
   <button data-t="trend">Trend</button>
   <button data-t="tags">Tags</button>
-  <button data-t="learn">Learn</button>
+  <button data-t="learn">Reference</button>
   <button data-t="settings" data-min="admin" data-hide="1">Settings</button>
 </nav>
 <div id="forceBanner" hidden>⚠ FORCES ACTIVE — <a href="#" id="forceGo">view in Tags</a></div>
 <div id="layout">
   <main>
+    <!-- MISSION (lessons + challenges) -->
+    <section id="tab-mission" class="tab"><div id="mission"></div></section>
+    <!-- BUILD (sandbox machines) -->
+    <section id="tab-build" class="tab"><div id="build"></div></section>
+
     <!-- PROGRAM -->
     <section id="tab-program" class="tab">
       <div class="toolbar">
@@ -89,7 +98,7 @@
           <select id="hmiTheme" data-min="engineer"><option value="hp">ISA-101 high-performance</option><option value="dark">Dark control room</option></select></label>
         <button id="hmiFullBtn" class="ghost" title="Full screen HMI">⛶</button>
       </div>
-      <div class="bezel"><div class="bezel-tag"><span>HMI-01 · OPERATOR STATION</span><span id="hmiClock"></span></div><div id="hmiWrap"><div id="hmiCanvas" class="hp"></div></div></div>
+      <div class="bezel"><div class="bezel-tag"><span>HMI-01 · Operator station</span><span id="hmiClock"></span></div><div id="hmiWrap"><div id="hmiCanvas" class="hp"></div></div></div>
       <div id="hmiProps" class="card" hidden></div>
     </section>
 
@@ -151,7 +160,7 @@
     <section id="tab-settings" class="tab"><div id="settings"></div></section>
 
     <!-- LEARN -->
-    <section id="tab-learn" class="tab"><div id="learn" class="card prose"></div></section>
+    <section id="tab-learn" class="tab"><div id="learn" class="card prose" style="margin-top:14px"></div></section>
   </main>
 
   <!-- PLANT -->
@@ -165,7 +174,8 @@
     <div id="view2d" hidden></div>
     <div id="plantMsgs"></div>
     <div id="score" class="small"></div>
-    <div class="panel">
+    <div id="sbPanel" class="opanel"></div>
+    <div class="panel" id="fixedPanel">
       <div class="pbtn green" data-pb="pb_start">START</div>
       <div class="pbtn red" data-pb="pb_stop">STOP</div>
       <div class="estop" data-pb="estop" title="Latching emergency stop"><span>E-STOP</span></div>
@@ -176,6 +186,7 @@
   </aside>
 </div>
 
+<div id="home"></div>
 <div id="modal" hidden><div class="mbox"><div id="mbody"></div></div></div>
 <div id="toast" hidden></div>
 
@@ -185,6 +196,8 @@
 <script src="js/learn.js"></script>
 <script src="js/hmi.js"></script>
 <script src="js/ld.js"></script>
+<script src="js/sandbox.js"></script>
 <script src="js/app.js"></script>
+<script src="js/modes.js"></script>
 </body>
 </html>
