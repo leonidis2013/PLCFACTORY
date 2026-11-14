@@ -75,7 +75,8 @@ header{position:sticky;top:0;z-index:20;display:flex;gap:8px;align-items:center;
   backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:9px;font:700 15px/1 var(--sans);letter-spacing:.01em;white-space:nowrap;margin-right:6px}
 .brand b{font-weight:700;color:var(--accent)}
-.brand small{font:500 11px/1 var(--sans);color:var(--dim);border-left:1px solid var(--line-2);padding-left:9px}
+.brand small{font:500 11px/1 var(--mono);color:var(--dim);border-left:1px solid var(--line-2);padding-left:9px}
+#verTag:empty{display:none}
 .brand .mark{width:22px;height:22px;border-radius:6px;background:var(--accent);position:relative;flex:none}
 .brand .mark::before,.brand .mark::after{content:"";position:absolute;left:5px;right:5px;height:2px;border-radius:1px;background:var(--accent-ink)}
 .brand .mark::before{top:7px;right:9px} .brand .mark::after{top:13px;left:9px}
@@ -112,7 +113,7 @@ body:not([data-kind=lesson]):not([data-kind=challenge]) [data-t=mission],body:no
 }
 @media (max-width:600px){
   .hide-s{display:none} header{gap:6px;padding:8px} #wsBtn{flex:1;min-width:0;max-width:none} #wsBtn .chipk{display:none} #plcStat{display:none}
-  .brand>span:not(.mark){display:none} button.mode{min-width:0;padding:6px 9px}
+  .brand>span:not(.mark){display:none} .brand small{border:0;padding-left:0} button.mode{min-width:0;padding:6px 9px}
   #userBtn{max-width:64px;overflow:hidden;text-overflow:ellipsis;padding:4px 6px} #userBtn small,#conn,#scanInfo{display:none}
 }
 .toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:12px 0 8px}

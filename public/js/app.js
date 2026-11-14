@@ -972,6 +972,7 @@ function frame() {
 (async function boot() {
   S.me = await api('GET', '/api/me');
   S.meta = await api('GET', '/api/meta');
+  $('#verTag').textContent = 'v' + S.meta.version;
   try { S.view = localStorage.getItem('plcf.view') || '3d'; } catch (e) {}
   $$('.seg button').forEach(x => x.classList.toggle('on', x.dataset.v === S.view));
   $('#view3d').hidden = S.view !== '3d'; $('#view2d').hidden = S.view !== '2d';
