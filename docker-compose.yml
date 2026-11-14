@@ -2,6 +2,7 @@
 services:
   plcfactory:
     image: ghcr.io/leonidis2013/plcfactory:latest
+    pull_policy: always   # check for a newer image every time the app is (re)started
     container_name: plcfactory
     restart: unless-stopped
     environment:
