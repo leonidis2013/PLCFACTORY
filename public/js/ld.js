@@ -2,13 +2,13 @@
 /* PLCFACTORY Ladder Diagram editor + online power-flow view.
    Rung = { comment, rows:[[contact…]…] (parallel branches of series contacts), outs:[output…] } */
 const LDE = (() => {
-  const IN = [['NO', 'Normally open contact  —| |—'], ['NC', 'Normally closed contact  —|/|—'], ['P', 'Rising edge contact  —|P|—'], ['N', 'Falling edge contact  —|N|—'], ['CMP', 'Compare  A ? B']];
+  const IN = [['NO', 'Normally open contact  —| |—'], ['NC', 'Normally closed contact  —|/|—'], ['P', 'Rising edge contact  —|P|—'], ['N', 'Falling edge contact  —|N|—'], ['ONS', 'One-shot  —[ONS]—  (storage bit)'], ['CMP', 'Compare  A ? B']];
   const OUT = [['COIL', 'Coil  —( )—'], ['NCOIL', 'Negated coil  —(/)—'], ['SET', 'Set (latch)  —(S)—'], ['RST', 'Reset (unlatch)  —(R)—'],
     ['TON', 'TON on-delay timer'], ['TOF', 'TOF off-delay timer'], ['TP', 'TP pulse timer'], ['CTU', 'CTU up counter'], ['CTD', 'CTD down counter'], ['RES', 'RES reset timer/counter'],
     ['MOV', 'MOV move'], ['ADD', 'ADD'], ['SUB', 'SUB'], ['MUL', 'MUL'], ['DIV', 'DIV'], ['BSL', 'BSL shift register left'], ['BSR', 'BSR shift register right'], ['ST', 'ST statement']];
   const OPS = ['=', '<>', '>', '>=', '<', '<='];
   const FIELDS = {
-    NO: [['a', 'Tag']], NC: [['a', 'Tag']], P: [['a', 'Tag']], N: [['a', 'Tag']], CMP: [['a', 'A'], ['op', 'Compare'], ['b', 'B']],
+    NO: [['a', 'Tag']], NC: [['a', 'Tag']], P: [['a', 'Tag']], N: [['a', 'Tag']], ONS: [['a', 'Storage bit (a BOOL used only here)']], CMP: [['a', 'A'], ['op', 'Compare'], ['b', 'B']],
     COIL: [['a', 'Tag']], NCOIL: [['a', 'Tag']], SET: [['a', 'Tag']], RST: [['a', 'Tag']],
     TON: [['a', 'Timer (TON variable)'], ['b', 'Preset PT']], TOF: [['a', 'Timer (TOF variable)'], ['b', 'Preset PT']], TP: [['a', 'Timer (TP variable)'], ['b', 'Preset PT']],
     CTU: [['a', 'Counter (CTU variable)'], ['b', 'Preset PV']], CTD: [['a', 'Counter (CTD variable)'], ['b', 'Preset PV']], RES: [['a', 'Timer/counter to reset']],
@@ -17,7 +17,7 @@ const LDE = (() => {
     BSL: [['a', 'Array'], ['b', 'Value shifted in (bit / record)']], BSR: [['a', 'Array'], ['b', 'Value shifted in (bit / record)']], ST: [['a', 'ST statement']],
   };
   const debounce2 = (fn, ms) => { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; };
-  const isBox = t => !['NO', 'NC', 'P', 'N', 'COIL', 'NCOIL', 'SET', 'RST'].includes(t);
+  const isBox = t => !['NO', 'NC', 'P', 'N', 'ONS', 'COIL', 'NCOIL', 'SET', 'RST'].includes(t);
   let host, pou, opts, sel = null, errRung = 0;
 
   const truthy = v => v === true || (typeof v === 'number' && v !== 0);
@@ -53,6 +53,7 @@ const LDE = (() => {
     switch (t) {
       case 'NO': return w('<rect x="22" y="3" width="20" height="24" class="gap"/><line x1="24" y1="4" x2="24" y2="26" class="bar"/><line x1="40" y1="4" x2="40" y2="26" class="bar"/>');
       case 'NC': return w('<rect x="22" y="3" width="20" height="24" class="gap"/><line x1="24" y1="4" x2="24" y2="26" class="bar"/><line x1="40" y1="4" x2="40" y2="26" class="bar"/><line x1="27" y1="26" x2="37" y2="4" class="bar"/>');
+      case 'ONS': return w('<rect x="14" y="5" width="36" height="20" rx="2" class="gap" style="stroke:var(--text);stroke-width:1.5"/><text x="32" y="19.5" class="lt" style="font-size:10px">ONS</text>');
       case 'P': case 'N': return w(`<rect x="22" y="3" width="20" height="24" class="gap"/><line x1="24" y1="4" x2="24" y2="26" class="bar"/><line x1="40" y1="4" x2="40" y2="26" class="bar"/><text x="32" y="20" class="lt">${t}</text>`);
       case 'COIL': case 'NCOIL': case 'SET': case 'RST': {
         const l = { COIL: '', NCOIL: '/', SET: 'S', RST: 'R' }[t];
@@ -138,7 +139,7 @@ const LDE = (() => {
   const TYPES = ['BOOL', 'INT', 'DINT', 'REAL', 'TIME', 'TON', 'TOF', 'TP', 'CTU', 'CTD', 'R_TRIG', 'F_TRIG'];
   function guessType(el, k) {
     if (['TON', 'TOF', 'TP', 'CTU', 'CTD'].includes(el.t) && k === 'a') return el.t;
-    if (['NO', 'NC', 'P', 'N', 'COIL', 'NCOIL', 'SET', 'RST'].includes(el.t)) return 'BOOL';
+    if (['NO', 'NC', 'P', 'N', 'ONS', 'COIL', 'NCOIL', 'SET', 'RST'].includes(el.t)) return 'BOOL';
     if (el.t === 'CMP' || el.t === 'MOV' || ['ADD', 'SUB', 'MUL', 'DIV'].includes(el.t)) return /\./.test(String(el.a) + String(el.b)) ? 'REAL' : 'INT';
     return 'BOOL';
   }
@@ -236,10 +237,10 @@ const LDE = (() => {
           const lv = e.querySelector('.lv');
           if (lv) { const v = value(el.a); lv.textContent = v === undefined ? '' : typeof v === 'boolean' ? (v ? '1' : '0') : (+v).toFixed(Number.isInteger(+v) ? 0 : 2); }
           const bl = e.querySelector('.bx-live'); if (bl) { const t = liveText(el); if (bl.textContent !== t) bl.textContent = t; }
-          if (el.t === 'P' || el.t === 'N') pw = false; else pw = pw && st === true;
+          if (el.t === 'P' || el.t === 'N' || el.t === 'ONS') pw = false; else pw = pw && st === true;
         });
         // edges are TRUE for one scan only: trust the generated result instead
-        if (row.some(el => el.t === 'P' || el.t === 'N')) pw = false;
+        if (row.some(el => el.t === 'P' || el.t === 'N' || el.t === 'ONS')) pw = false;
         rowEl.classList.toggle('pw', pw && row.length > 0);
         if (pw && row.length) rungPw = true;
       });
@@ -253,7 +254,7 @@ const LDE = (() => {
           e.classList.toggle('on', st === true); e.classList.toggle('pw', pw && st === true);
           const lv = e.querySelector('.lv'); if (lv) { const v = value(el.a); lv.textContent = v === undefined ? '' : typeof v === 'boolean' ? (v ? '1' : '0') : (+v).toFixed(Number.isInteger(+v) ? 0 : 2); }
           const bl = e.querySelector('.bx-live'); if (bl) { const t = liveText(el); if (bl.textContent !== t) bl.textContent = t; }
-          pw = pw && st === true && el.t !== 'P' && el.t !== 'N';
+          pw = pw && st === true && el.t !== 'P' && el.t !== 'N' && el.t !== 'ONS';
         });
         rEl.querySelector('.rpost').classList.toggle('pw', rungPw);
         rungPw = pw;

@@ -7,13 +7,13 @@
  *   post (optional) are contacts in series after the branches, e.g. (Start OR Run) AND Stop.
  *   Every output is driven by the rung result (outputs in parallel).
  *
- * Inputs:  NO a · NC a · P a (rising edge) · N a (falling edge) · CMP a op b
+ * Inputs:  NO a · NC a · P a (rising edge) · N a (falling edge) · ONS a=storage bit (one-shot of the rung so far) · CMP a op b
  * Outputs: COIL a · NCOIL a · SET a · RST a
  *          TON/TOF/TP a=instance b=preset · CTU/CTD a=instance b=preset · RES a=instance
  *          MOV a→b · ADD/SUB/MUL/DIV a,b→c · BSL/BSR a=array b=bit/value (on rung rising edge)
  *          ST a = one ST statement executed while the rung is true
  */
-const INPUTS = ['NO', 'NC', 'P', 'N', 'CMP'];
+const INPUTS = ['NO', 'NC', 'P', 'N', 'ONS', 'CMP'];
 const OUTPUTS = ['COIL', 'NCOIL', 'SET', 'RST', 'TON', 'TOF', 'TP', 'CTU', 'CTD', 'RES', 'MOV', 'ADD', 'SUB', 'MUL', 'DIV', 'BSL', 'BSR', 'ST'];
 const CMP_OPS = ['=', '<>', '>', '>=', '<', '<='];
 
@@ -52,10 +52,22 @@ function toST(pou, uidx) {
       if (!CMP_OPS.includes(el.op)) throw new LdError(r, `Unknown compare '${el.op}'`);
       return `(${operand(el.a, r, 'Compare A')} ${el.op} ${operand(el.b, r, 'Compare B')})`;
     };
-    const terms = rows.map(row => row.map(contact).map(x => `(${x})`).join(' AND '));
-    const post = (rung.post || []).map(contact).map(x => `(${x})`);
+    // series evaluation left to right; ONS turns "the rung so far" into a one-scan pulse (storage bit keeps last state)
+    const series = (els, start) => {
+      let acc = start;
+      for (const el of els) {
+        if (el.t === 'ONS') {
+          const st = operand(el.a, r, 'ONS storage bit'), n = `${P}O${++edge}`, prefix = acc || 'TRUE';
+          decl.push(`${n} : BOOL;`);
+          pre.push(`${n} := (${prefix}) AND NOT ${st};`, `${st} := (${prefix});`);
+          acc = n;
+        } else { const c = `(${contact(el)})`; acc = acc ? `${acc} AND ${c}` : c; }
+      }
+      return acc;
+    };
+    const terms = rows.map(row => series(row, null));
     let cond = terms.length ? terms.map(t => `(${t})`).join(' OR ') : 'TRUE';
-    if (post.length) cond = `(${cond}) AND ${post.join(' AND ')}`;
+    if ((rung.post || []).length) cond = series(rung.post, `(${cond})`);
     pre.forEach(s => out.push(s));
     out.push(`${P}R := ${cond};`);
     for (const o of rung.outs || []) {

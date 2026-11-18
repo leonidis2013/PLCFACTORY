@@ -696,6 +696,7 @@ const LD_THEORY = {
  |--+--] [-------]/[--+--------------------------( )--|
  |  |  OneShot     Lamp |
  |  +--]/[-------] [--+`)}
+    <p>Instead of <code>]P[</code> you can use the <b>ONS</b> instruction (as in Studio 5000): put <code>I_Button</code> then <code>[ONS]</code> in series. ONS passes power for one scan when everything to its left goes TRUE, and needs its own <b>storage bit</b> — a BOOL you use nowhere else (e.g. <code>Toggle_ONS</code>).</p>
     <p>Without the one-shot, the lamp would flicker on and off every scan while the button is held.</p>`,
   L09: `<p>Most transmitters send <b>4–20 mA</b>: 4 mA is 0 % of range, 20 mA is 100 %. The live zero at 4 mA lets you tell "empty" (4 mA) from a <b>broken wire</b> (0 mA). Under NAMUR NE43, below 3.6–3.8 mA means a fault.</p>
     <p>In ladder, scaling uses <b>math boxes</b> on an always-true rung (a rung with no contacts), and <b>compare contacts</b> for limits:</p>
