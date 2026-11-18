@@ -460,6 +460,7 @@ class Parser {
   }
   assign(pa, e) {
     if (pa.readonly) throw new PlcError(pa.line, `'${pa.name}' is read-only`);
+    if (pa.tag && (pa.tag.kind === 'DI' || pa.tag.kind === 'AI')) throw new PlcError(pa.line, `'${pa.name}' is a physical input — the PLC reads it from the field every scan and can't write it. Use it as a condition (a contact) and drive an internal bit or an output instead.`);
     if (pa.fbOut) throw new PlcError(pa.line, `'${pa.name}' is a function block output and can't be written`);
     const t = pa.t, set = pa.set;
     if (t.k === 'f' || !set) throw new PlcError(pa.line, `Can't assign to a function block instance. Call it instead: ${pa.name}(...);`);
