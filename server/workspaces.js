@@ -89,7 +89,8 @@ class Workspaces {
     if (k === 'practice') return normalizeProject(Object.assign(base, { scen: ws }, this.plants[ws].defaults()));
     if (k === 'lesson') {
       const x = L[ws.slice(7)];
-      return normalizeProject(Object.assign(base, { scen: 'sandbox', layout: clone(x.layout), sensors: clone(x.sensors), mission: { hints: 0, solution: false } }, clone(x.starter)));
+      const lang = opts.lang === 'LD' ? 'LD' : 'ST';
+      return normalizeProject(Object.assign(base, { scen: 'sandbox', layout: clone(x.layout), sensors: clone(x.sensors), mission: { hints: 0, solution: false, lang } }, clone(lang === 'LD' ? x.ld.starter : x.starter)));
     }
     if (k === 'challenge') {
       const x = CH[ws.slice(5)];
@@ -102,12 +103,12 @@ class Workspaces {
     }
     const t = TEMPLATES[opts.template] || TEMPLATES.blank;
     return normalizeProject(Object.assign(base, { scen: 'sandbox', name: opts.name || t.name, layout: clone(t.layout), sensors: clone(t.sensors), types: '', globals: '',
-      pous: [{ id: 'main', name: 'Main', lang: 'ST', src: '(* ' + (opts.name || t.name) + ' *)\n' }] }));
+      pous: [opts.lang === 'LD' ? { id: 'main', name: 'Main', lang: 'LD', rungs: [] } : { id: 'main', name: 'Main', lang: 'ST', src: '(* ' + (opts.name || t.name) + ' *)\n' }] }));
   }
-  load(ws) {
+  load(ws, user) {
     let p = null;
     try { p = JSON.parse(fs.readFileSync(this.file(ws), 'utf8')); } catch {}
-    if (!p) return this.fresh(ws);
+    if (!p) return this.fresh(ws, { lang: user ? this.lang(user) : 'ST' });
     const k = kindOf(ws);
     if (k === 'practice') {
       // migrate 1.x project files
@@ -137,11 +138,11 @@ class Workspaces {
       return { id: ws, name, components: n, updated: at };
     }).sort((a, b) => b.updated - a.updated);
   }
-  newSandbox(name, template) {
+  newSandbox(name, template, lang) {
     const base = 'sb-' + slugify(name);
     let ws = base, i = 2;
     while (fs.existsSync(this.file(ws))) ws = `${base}-${i++}`;
-    const p = this.fresh(ws, { name: String(name || '').slice(0, 48) || undefined, template });
+    const p = this.fresh(ws, { name: String(name || '').slice(0, 48) || undefined, template, lang });
     this.save(p);
     return ws;
   }
@@ -150,6 +151,17 @@ class Workspaces {
   // ---------- progress ----------
   prog(user) { return (this.progress[user] = this.progress[user] || { lessons: {}, challenges: {} }); }
   writeProgress() { try { fs.writeFileSync(this.progFile, JSON.stringify(this.progress, null, 1)); } catch (e) { this.log('Could not save progress: ' + e.message); } }
+  lang(user) { return (this.progress[user] || {}).lang === 'LD' ? 'LD' : 'ST'; }
+  setDefaultLang(user, lang) { this.prog(user).lang = lang === 'LD' ? 'LD' : 'ST'; this.writeProgress(); }
+  /** switch a lesson to the other language: returns the starter units in that language */
+  setLessonLang(p, user, lang) {
+    lang = lang === 'LD' ? 'LD' : 'ST';
+    const x = L[p.ws.slice(7)];
+    p.mission = p.mission || { hints: 0, solution: false };
+    p.mission.lang = lang; p.mission.results = null;
+    this.setDefaultLang(user, lang);
+    return clone(lang === 'LD' ? x.ld.starter : x.starter);
+  }
   resetProgress(user) { delete this.progress[user]; this.writeProgress(); }
 
   // ---------- listing ----------
@@ -161,7 +173,7 @@ class Workspaces {
         done: !!(pr.lessons[x.id] || {}).done, best: (pr.lessons[x.id] || {}).passed || 0, started: fs.existsSync(this.file('lesson-' + x.id)) })),
       challenges: CHALLENGES.map(x => ({ id: x.id, ws: 'chal-' + x.id, title: x.title, difficulty: x.difficulty, plant: x.plant, par: x.par,
         best: (pr.challenges[x.id] || {}).best || 0, done: !!(pr.challenges[x.id] || {}).best, started: fs.existsSync(this.file('chal-' + x.id)) })),
-      sandboxes: this.sandboxes(),
+      sandboxes: this.sandboxes(), lang: this.lang(user),
       templates: Object.entries(TEMPLATES).map(([id, t]) => ({ id, name: t.name })),
     };
   }
@@ -173,7 +185,8 @@ class Workspaces {
       const x = L[p.ws.slice(7)], m = p.mission || (p.mission = { hints: 0, solution: false });
       const i = LESSONS.indexOf(x);
       return { kind: 'lesson', id: x.id, unit: x.unit, title: x.title, summary: x.summary, theory: x.theory, task: x.task, minutes: x.minutes,
-        objectives: x.objectives.map(o => ({ id: o.id, text: o.text })), results: m.results || null, hints: x.hints.slice(0, m.hints), hintCount: x.hints.length,
+        objectives: x.objectives.map(o => ({ id: o.id, text: o.text })), results: m.results || null, lang: m.lang === 'LD' ? 'LD' : 'ST',
+        hints: (m.lang === 'LD' ? x.ld.hints : x.hints).slice(0, m.hints), hintCount: (m.lang === 'LD' ? x.ld.hints : x.hints).length,
         solutionViewed: !!m.solution, done: !!(this.prog(user).lessons[x.id] || {}).done, index: i + 1, total: LESSONS.length,
         prev: i > 0 ? 'lesson-' + LESSONS[i - 1].id : null, next: i < LESSONS.length - 1 ? 'lesson-' + LESSONS[i + 1].id : null };
     }
@@ -208,14 +221,15 @@ class Workspaces {
   }
   hint(p) {
     const k = kindOf(p.ws);
-    if (k === 'lesson') { const x = L[p.ws.slice(7)]; p.mission = p.mission || { hints: 0 }; p.mission.hints = Math.min(x.hints.length, (p.mission.hints || 0) + 1); return { ok: true, hints: x.hints.slice(0, p.mission.hints) }; }
+    if (k === 'lesson') { const x = L[p.ws.slice(7)]; p.mission = p.mission || { hints: 0 }; const H = p.mission.lang === 'LD' ? x.ld.hints : x.hints; p.mission.hints = Math.min(H.length, (p.mission.hints || 0) + 1); return { ok: true, hints: H.slice(0, p.mission.hints) }; }
     if (k === 'challenge') { const x = CH[p.ws.slice(5)], c = p.challenge; if (c.done) return { ok: false, msg: 'Challenge finished' }; c.hints = Math.min(x.hints.length, c.hints + 1); return { ok: true, hints: x.hints.slice(0, c.hints) }; }
     return { ok: false, msg: 'No hints here' };
   }
   solution(p) {
     if (kindOf(p.ws) !== 'lesson') return { ok: false, msg: 'Only lessons have a reference solution' };
     p.mission = p.mission || { hints: 0 }; p.mission.solution = true;
-    return { ok: true, units: clone(L[p.ws.slice(7)].solution) };
+    const x = L[p.ws.slice(7)];
+    return { ok: true, units: clone(p.mission.lang === 'LD' ? x.ld.solution : x.solution) };
   }
 
   // ---------- challenge maintenance & submission ----------

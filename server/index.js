@@ -50,10 +50,10 @@ rt.scanMs = settings.scanMs;
   const first = settings.ws || settings.scen || 'tank';
   try { rt.load(wsm.load(wsm.valid(first) ? first : 'tank')); } catch (e) { log('Could not load workspace ' + first + ': ' + e.message); rt.load(wsm.fresh('tank')); }
 }
-function switchTo(ws) {
+function switchTo(ws, user) {
   if (!wsm.valid(ws)) return { ok: false, msg: 'Unknown workspace' };
   try { wsm.save(rt.project); } catch (e) { log('Save failed: ' + e.message); }
-  const r = rt.load(wsm.load(ws));
+  const r = rt.load(wsm.load(ws, user));
   save();
   return Object.assign({ ok: true, compiled: r.ok, ws }, r.ok ? {} : { msg: r.msg });
 }
@@ -136,7 +136,7 @@ const PERM = {
   'POST /api/check': 'engineer', 'POST /api/download': 'engineer', 'PUT /api/source': 'engineer', 'POST /api/mode': 'engineer',
   'POST /api/scan': 'engineer', 'POST /api/force': 'engineer', 'PUT /api/sensors': 'engineer', 'PUT /api/actfaults': 'engineer',
   'PUT /api/sensorfault': 'engineer', 'PUT /api/hmitheme': 'engineer', 'PUT /api/hmi': 'engineer', 'PUT /api/alarms': 'engineer',
-  'POST /api/scenario': 'engineer', 'POST /api/workspace': 'engineer', 'POST /api/sandbox/new': 'engineer', 'POST /api/sandbox/delete': 'engineer',
+  'POST /api/scenario': 'engineer', 'POST /api/workspace': 'engineer', 'POST /api/sandbox/new': 'engineer', 'POST /api/lang': 'engineer', 'POST /api/sandbox/delete': 'engineer',
   'POST /api/sandbox/rename': 'engineer', 'PUT /api/layout': 'engineer', 'POST /api/grade': 'engineer', 'POST /api/hint': 'engineer', 'POST /api/solution': 'engineer',
   'POST /api/challenge/replace': 'engineer', 'POST /api/challenge/submit': 'engineer', 'POST /api/progress/reset': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
   'GET /api/users': 'admin', 'GET /api/settings': 'admin', 'PUT /api/settings': 'admin', 'POST /api/users': 'admin', 'POST /api/users/delete': 'admin',
@@ -196,12 +196,22 @@ const routes = {
   'PUT /api/alarms': b => { rt.project.alarms = b.alarms || []; rt.alm = {}; rt.almVer++; rt.projVer++; save(); return { ok: true }; },
   'PUT /api/pens': b => { rt.project.pens = b.pens || []; save(); return { ok: true }; },
   'POST /api/ack': b => { rt.ack(b.id || 'all'); return { ok: true }; },
-  'POST /api/scenario': b => switchTo(String(b.id || '')),
-  'POST /api/workspace': b => switchTo(String(b.id || '')),
+  'POST /api/scenario': (b, me) => switchTo(String(b.id || ''), me.username),
+  'POST /api/workspace': (b, me) => switchTo(String(b.id || ''), me.username),
   'GET /api/workspaces': (b, me) => Object.assign({ ok: true, current: rt.project.ws }, wsm.list(me.username)),
   'GET /api/mission': (b, me) => Object.assign({ ok: true }, wsm.mission(rt.project, me.username)),
   'GET /api/catalog': () => Object.assign({ ok: true }, require('./plants/sandbox').catalog()),
-  'POST /api/sandbox/new': b => { const ws = wsm.newSandbox(b.name, b.template); return switchTo(ws); },
+  'POST /api/sandbox/new': (b, me) => { const ws = wsm.newSandbox(b.name, b.template, b.lang || wsm.lang(me.username)); return switchTo(ws, me.username); },
+  'POST /api/lang': (b, me) => {
+    const lang = b.lang === 'LD' ? 'LD' : 'ST';
+    if (kindOf(rt.project.ws) !== 'lesson' || !b.lesson) { wsm.setDefaultLang(me.username, lang); return { ok: true, lang }; }
+    const units = wsm.setLessonLang(rt.project, me.username, lang);
+    delete rt.project.draft;
+    const r = rt.download(unitsOf(units), false);
+    Object.assign(rt.project, unitsOf(units)); rt.projVer++;
+    rt.log('LEARN', `Lesson switched to ${lang === 'LD' ? 'Ladder Diagram' : 'Structured Text'}`);
+    save(); return Object.assign({ lang }, r);
+  },
   'POST /api/sandbox/delete': b => {
     const id = String(b.id || '');
     if (id === rt.project.ws) switchTo('tank');
@@ -250,7 +260,7 @@ const routes = {
   },
   'POST /api/progress/reset': (b, me) => { wsm.resetProgress(me.username); return { ok: true }; },
   'POST /api/reset-project': b => {
-    const d = wsm.fresh(rt.project.ws);
+    const d = wsm.fresh(rt.project.ws, { lang: kindOf(rt.project.ws) === 'lesson' ? (rt.project.mission || {}).lang : (rt.project.pous[0] || {}).lang, name: rt.project.name });
     const keep = b.part && b.part !== 'all' ? b.part : null;
     if (keep === 'src') { delete rt.project.draft; rt.download(unitsOf(d), false); Object.assign(rt.project, unitsOf(d)); rt.projVer++; }
     else if (keep) { rt.project[keep] = d[keep]; if (keep === 'sensors') rt.setSensors(d.sensors); rt.projVer++; }

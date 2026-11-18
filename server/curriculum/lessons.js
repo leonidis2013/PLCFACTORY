@@ -452,4 +452,131 @@ AO_H1_Power := TIC.Y;</pre>
   },
 ];
 
+
+/* ───────────── Ladder versions: starter, reference solution and ladder-specific hints ───────────── */
+const NO = a => ({ t: 'NO', a }), NC = a => ({ t: 'NC', a }), PE_ = a => ({ t: 'P', a }), NE_ = a => ({ t: 'N', a });
+const CMP = (a, op, b) => ({ t: 'CMP', a, op, b });
+const O = (t, a, b, c) => Object.assign({ t, a }, b !== undefined ? { b } : {}, c !== undefined ? { c } : {});
+const R = (comment, rows, outs) => ({ comment, rows, outs });
+const LDU = (globals, rungs, types = '') => ({ types, globals: globals ? `VAR_GLOBAL\n${globals}\nEND_VAR\n` : '', pous: [{ id: 'main', name: 'Main', lang: 'LD', rungs }] });
+
+const LADDER = {
+  L01: { starter: LDU('', []), solution: LDU('', [R('PL1 follows PB1', [[NO('I_PB1')]], [O('COIL', 'Q_PL1')])]),
+    hints: ['Add a rung: a normally-open contact I_PB1 driving a coil Q_PL1.', 'An NO contact passes power while its tag is TRUE.'] },
+  L02: { starter: LDU('', []), solution: LDU('', [R('NC stop wiring: the input is TRUE while healthy', [[NO('I_Stop')]], [O('COIL', 'Q_Ready')])]),
+    hints: ['Watch I_Stop in the Tags tab. It is TRUE when nobody presses Stop.', 'Use a normally-OPEN contact on I_Stop — the field wiring already inverts it. An NC contact here would be a double negative.'] },
+  L03: { starter: LDU('  Run : BOOL;', []), solution: null,
+    hints: ['Two branches in parallel: I_Start, and a Run contact (the seal-in). Put I_Stop in series on both branches. Drive coil Run.', 'Then a rung Run → Q_M1_Run, and a rung I_M1_Running → Q_RunLamp.'] },
+  L04: { starter: LDU('  Fwd, Rev : BOOL;', []),
+    solution: LDU('  Fwd, Rev : BOOL;', [
+      R('Forward seal-in, interlocked with reverse', [[NO('I_Fwd'), NO('I_Stop'), NC('Rev')], [NO('Fwd'), NO('I_Stop'), NC('Rev')]], [O('COIL', 'Fwd')]),
+      R('Reverse seal-in, interlocked with forward', [[NO('I_Rev'), NO('I_Stop'), NC('Fwd')], [NO('Rev'), NO('I_Stop'), NC('Fwd')]], [O('COIL', 'Rev')]),
+      R('', [[NO('Fwd')]], [O('COIL', 'Q_M1_Fwd')]),
+      R('', [[NO('Rev')]], [O('COIL', 'Q_M1_Rev')])]),
+    hints: ['Build two seal-in rungs, one per direction (coils Fwd and Rev).', 'Add an NC contact of the other direction in series on each branch: NC Rev in the Fwd rung, NC Fwd in the Rev rung.'] },
+  L05: { starter: LDU('  StartReq : BOOL;\n  Warn     : TON;', []),
+    solution: LDU('  StartReq : BOOL;\n  Warn     : TON;', [
+      R('Start request (seal-in)', [[NO('I_Start'), NO('I_Stop')], [NO('StartReq'), NO('I_Stop')]], [O('COIL', 'StartReq')]),
+      R('3 s warning timer', [[NO('StartReq')]], [O('TON', 'Warn', 'T#3s')]),
+      R('Horn and amber during the warning', [[NO('StartReq'), NC('Warn.Q')]], [O('COIL', 'Q_SL_Horn'), O('COIL', 'Q_SL_Amber')]),
+      R('Run after the warning', [[NO('Warn.Q')]], [O('COIL', 'Q_C1_Run'), O('COIL', 'Q_SL_Green')])]),
+    hints: ['Rung 1: seal-in coil StartReq. Rung 2: StartReq drives a TON box with instance Warn, preset T#3s.', 'Horn/amber: StartReq AND NC Warn.Q. Conveyor/green: NO Warn.Q.'] },
+  L06: { starter: LDU('  RunOn : TOF;', []),
+    solution: LDU('  RunOn : TOF;', [
+      R('Heater lamp and fan run-on timer', [[NO('I_Heat_P1')]], [O('COIL', 'Q_HeaterLamp'), O('TOF', 'RunOn', 'T#10s')]),
+      R('', [[NO('RunOn.Q')]], [O('COIL', 'Q_Fan_Run')])]),
+    hints: ['One rung with I_Heat_P1 can drive several outputs: the lamp coil and a TOF box (instance RunOn, preset T#10s).', 'Second rung: NO RunOn.Q → Q_Fan_Run.'] },
+  L07: { starter: LDU('  Run   : BOOL;\n  Batch : CTU;', []),
+    solution: LDU('  Run   : BOOL;\n  Batch : CTU;', [
+      R('Count parts', [[NO('I_PE')]], [O('CTU', 'Batch', '5')]),
+      R('Reset the batch', [[NO('I_Reset')]], [O('RES', 'Batch')]),
+      R('Run until the batch is complete', [[NO('I_Start'), NO('I_Stop'), NC('Batch.Q')], [NO('Run'), NO('I_Stop'), NC('Batch.Q')]], [O('COIL', 'Run')]),
+      R('', [[NO('Run')]], [O('COIL', 'Q_C1_Run')]),
+      R('', [[NO('Batch.Q')]], [O('COIL', 'Q_Done')])]),
+    hints: ['A CTU box (instance Batch, preset 5) driven by an NO contact I_PE counts each rising edge.', 'Reset with a RES instruction on Batch from I_Reset, and put NC Batch.Q in series in your seal-in.'] },
+  L08: { starter: LDU('  On      : BOOL;\n  OneShot : BOOL;', []),
+    solution: LDU('  On      : BOOL;\n  OneShot : BOOL;', [
+      R('One-shot: TRUE for a single scan per press', [[PE_('I_Toggle')]], [O('COIL', 'OneShot')]),
+      R('Flip-flop: the one-shot inverts On', [[NO('OneShot'), NC('On')], [NC('OneShot'), NO('On')]], [O('COIL', 'On')]),
+      R('', [[NO('On')]], [O('COIL', 'Q_Lamp')])]),
+    hints: ['A P (positive transition) contact on I_Toggle into a coil OneShot gives one scan per press.', 'Classic flip-flop rung: (OneShot AND NC On) OR (NC OneShot AND On) → coil On.'] },
+  L09: { starter: LDU('  Level   : REAL;   (* % *)\n  TxFault : BOOL;', []),
+    solution: LDU('  Level   : REAL;\n  TxFault : BOOL;', [
+      R('Wire break below 3.8 mA', [[CMP('AI_T1_mA', '<', '3.8')]], [O('COIL', 'TxFault')]),
+      R('Scale 4–20 mA to 0–100 % (100 / 16 = 6.25)', [], [O('SUB', 'AI_T1_mA', '4.0', 'Level'), O('MUL', 'Level', '6.25', 'Level')]),
+      R('Fill to 75 %', [[NC('TxFault'), CMP('Level', '<', '75.0')]], [O('COIL', 'Q_Fill_Open')]),
+      R('High level', [[CMP('Level', '>', '80.0'), NC('TxFault')]], [O('COIL', 'Q_High')])]),
+    hints: ['A rung with no contacts is always true. Use SUB (mA − 4.0 → Level) then MUL (Level × 6.25 → Level).', 'Compare contacts: AI_T1_mA < 3.8 → TxFault; NC TxFault + Level < 75.0 → Q_Fill_Open.'] },
+  L10: { starter: LDU('  Filling : BOOL;', [R('Given: outlet follows demand', [[NO('I_Demand_P1')]], [O('COIL', 'Q_Out_Open')])]),
+    solution: LDU('  Filling : BOOL;', [
+      R('Given: outlet follows demand', [[NO('I_Demand_P1')]], [O('COIL', 'Q_Out_Open')]),
+      R('Start filling at the low limit', [[CMP('AI_Level', '<=', '40.0')]], [O('SET', 'Filling')]),
+      R('Stop filling at the high limit', [[CMP('AI_Level', '>=', '60.0')]], [O('RST', 'Filling')]),
+      R('', [[NO('Filling')]], [O('COIL', 'Q_Fill_Open')]),
+      R('Low-low', [[CMP('AI_Level', '<', '20.0')]], [O('COIL', 'Q_LowLow')])]),
+    hints: ['Use a SET (latch) coil on Filling at ≤ 40 % and a RST (unlatch) coil at ≥ 60 %.', 'Then NO Filling → Q_Fill_Open.'] },
+  L11: { starter: LDU('  Step   : INT;\n  MixTmr : TON;', []),
+    solution: LDU('  Step   : INT;\n  MixTmr : TON;', [
+      R('Stop aborts to idle', [[NC('I_Stop')]], [O('MOV', '0', 'Step')]),
+      R('Mix timer runs in step 20', [[CMP('Step', '=', '20')]], [O('TON', 'MixTmr', 'T#10s')]),
+      R('0 → 10: start', [[CMP('Step', '=', '0'), NO('I_Start'), NO('I_Stop')]], [O('MOV', '10', 'Step')]),
+      R('10 → 20: full', [[CMP('Step', '=', '10'), CMP('AI_Level', '>=', '70.0')]], [O('MOV', '20', 'Step')]),
+      R('20 → 30: mixed', [[CMP('Step', '=', '20'), NO('MixTmr.Q')]], [O('MOV', '30', 'Step')]),
+      R('30 → 0: empty', [[CMP('Step', '=', '30'), CMP('AI_Level', '<=', '5.0')]], [O('MOV', '0', 'Step')]),
+      R('Outputs from the step number', [[CMP('Step', '=', '10')]], [O('COIL', 'Q_Fill_Open')]),
+      R('', [[CMP('Step', '=', '20'), CMP('AI_Level', '>', '20.0')]], [O('COIL', 'Q_Mixer_Run')]),
+      R('', [[CMP('Step', '=', '30')]], [O('COIL', 'Q_Drain_Run')]),
+      R('', [[CMP('Step', '<>', '0')]], [O('COIL', 'Q_Busy')])]),
+    hints: ['One rung per transition: compare Step = n AND the condition → MOV the next step number into Step.', 'Then one rung per output: Step = 10 → Q_Fill_Open, and so on. Stop: NC I_Stop → MOV 0 to Step.'] },
+  L12: { starter: LDU('  HiActive, HiUnack, Flash : BOOL;\n  Blink : TON;', []),
+    solution: LDU('  HiActive, HiUnack, Flash : BOOL;\n  Blink : TON;', [
+      R('Activate above 90 %', [[CMP('AI_Level', '>', '90.0')]], [O('SET', 'HiActive')]),
+      R('Clear below 85 % (deadband)', [[CMP('AI_Level', '<', '85.0')]], [O('RST', 'HiActive')]),
+      R('Each new activation is unacknowledged', [[PE_('HiActive')]], [O('SET', 'HiUnack')]),
+      R('Acknowledge', [[NO('I_Ack')]], [O('RST', 'HiUnack')]),
+      R('0.5 s pulse generator', [[NC('Blink.Q')]], [O('TON', 'Blink', 'T#500ms')]),
+      R('Flasher flip-flop', [[NO('Blink.Q'), NC('Flash')], [NC('Blink.Q'), NO('Flash')]], [O('COIL', 'Flash')]),
+      R('Red: flash while unacknowledged, steady while active', [[NO('HiUnack'), NO('Flash')], [NO('HiActive'), NC('HiUnack')]], [O('COIL', 'Q_SL_Red')]),
+      R('Horn until acknowledged', [[NO('HiUnack')]], [O('COIL', 'Q_SL_Horn')])]),
+    hints: ['SET HiActive above 90 %, RST below 85 %. A P contact on HiActive SETs HiUnack; I_Ack RSTs it.', 'Pulse: NC Blink.Q → TON Blink T#500ms. Flip-flop rung toggles Flash on each pulse.', 'Red: (HiUnack AND Flash) OR (HiActive AND NC HiUnack).'] },
+  L13: { starter: LDU('  Run  : BOOL;\n  Fifo : ARRAY[0..9] OF BOOL;\n  N    : INT;', []),
+    solution: LDU('  Run       : BOOL;\n  Fifo      : ARRAY[0..9] OF BOOL;\n  N         : INT;\n  MetalSeen : BOOL;\n  Reject    : BOOL;\n  St        : INT;   (* 0 conveying, 10 extend, 20 retract *)', [
+      R('Belt seal-in', [[NO('I_Start'), NO('I_Stop')], [NO('Run'), NO('I_Stop')]], [O('COIL', 'Run')]),
+      R('Remember metal while the part is at the detector', [[NO('I_PE_Det'), NO('I_Metal')]], [O('SET', 'MetalSeen')]),
+      R('Part leaves the detector: push the result into the FIFO', [[NE_('I_PE_Det'), CMP('N', '<=', '9')]], [O('ST', 'Fifo[N] := MetalSeen'), O('ADD', 'N', '1', 'N'), O('RST', 'MetalSeen')]),
+      R('Part arrives at the pusher: take the oldest result', [[PE_('I_PE_Rej'), CMP('N', '>', '0')]], [O('MOV', 'Fifo[0]', 'Reject'), O('BSR', 'Fifo', 'FALSE'), O('SUB', 'N', '1', 'N')]),
+      R('Metal → start a push', [[NO('Reject'), CMP('St', '=', '0')]], [O('MOV', '10', 'St'), O('RST', 'Reject')]),
+      R('Extended → retract', [[CMP('St', '=', '10'), NO('I_Rej_Ext')]], [O('MOV', '20', 'St')]),
+      R('Retracted → done', [[CMP('St', '=', '20'), NO('I_Rej_Ret')]], [O('MOV', '0', 'St')]),
+      R('Belt stops while pushing', [[NO('Run'), CMP('St', '=', '0')]], [O('COIL', 'Q_C1_Run')]),
+      R('', [[CMP('St', '=', '10')]], [O('COIL', 'Q_Rej_Ext')])]),
+    hints: ['SET MetalSeen while I_PE_Det AND I_Metal. On the N (falling edge) of I_PE_Det: an ST box "Fifo[N] := MetalSeen", ADD N + 1 → N, RST MetalSeen.', 'On the P edge of I_PE_Rej: MOV Fifo[0] → Reject, BSR Fifo, SUB N − 1 → N. (MOV before BSR!)', 'A small step number St runs the pusher; the belt runs only while St = 0.'] },
+  L14: { starter: { types: '(* Lesson 14 — declare PumpCtl here *)\nTYPE\nEND_TYPE\n', globals: 'VAR_GLOBAL\nEND_VAR\n', pous: [{ id: 'main', name: 'Main', lang: 'LD', rungs: [] }] },
+    solution: Object.assign(LDU('  Pumps : ARRAY[1..3] OF PumpCtl;', [
+      R('Pump 1 at demand ≥ 0.5', [[CMP('AI_Demand', '>=', '0.5')]], [O('COIL', 'Pumps[1].Cmd'), O('COIL', 'Q_P1_Run')]),
+      R('Pump 2 at demand ≥ 1.5', [[CMP('AI_Demand', '>=', '1.5')]], [O('COIL', 'Pumps[2].Cmd'), O('COIL', 'Q_P2_Run')]),
+      R('Pump 3 at demand ≥ 2.5', [[CMP('AI_Demand', '>=', '2.5')]], [O('COIL', 'Pumps[3].Cmd'), O('COIL', 'Q_P3_Run')]),
+      R('Running feedback', [[NO('I_P1_Running')]], [O('COIL', 'Pumps[1].Running')]),
+      R('', [[NO('I_P2_Running')]], [O('COIL', 'Pumps[2].Running')]),
+      R('', [[NO('I_P3_Running')]], [O('COIL', 'Pumps[3].Running')]),
+      R('Count starts', [[PE_('Pumps[1].Running')]], [O('ADD', 'Pumps[1].Starts', '1', 'Pumps[1].Starts')]),
+      R('', [[PE_('Pumps[2].Running')]], [O('ADD', 'Pumps[2].Starts', '1', 'Pumps[2].Starts')]),
+      R('', [[PE_('Pumps[3].Running')]], [O('ADD', 'Pumps[3].Starts', '1', 'Pumps[3].Starts')])]),
+      { types: 'TYPE\n  PumpCtl : STRUCT\n    Cmd, Running : BOOL;\n    Starts       : INT;\n  END_STRUCT;\nEND_TYPE\n' }),
+    hints: ['Data types: TYPE PumpCtl : STRUCT Cmd, Running : BOOL; Starts : INT; END_STRUCT; END_TYPE. Globals: Pumps : ARRAY[1..3] OF PumpCtl;', 'Contacts and coils accept member paths like Pumps[2].Cmd. Compare AI_Demand >= 1.5 → coils Pumps[2].Cmd and Q_P2_Run.', 'Count starts with a P contact on Pumps[i].Running driving ADD Pumps[i].Starts + 1 → Pumps[i].Starts.'] },
+  L15: { starter: LDU('  TempSP : REAL := 45.0;', [R('Given: cold water flows through', [], [O('COIL', 'Q_In_Open'), O('COIL', 'Q_Out_Open')])]),
+    solution: LDU('  TempSP : REAL := 45.0;\n  TIC    : PID := (KP := 12.0, TN := 40.0);', [
+      R('Given: cold water flows through', [], [O('COIL', 'Q_In_Open'), O('COIL', 'Q_Out_Open')]),
+      R('Temperature loop', [], [O('COIL', 'Q_H1_On'), O('ST', 'TIC(ACTUAL := AI_Temp, SETPOINT := TempSP)'), O('MOV', 'TIC.Y', 'AO_H1_Power')])]),
+    hints: ['Declare TIC : PID := (KP := 10.0, TN := 40.0); in Globals. Ladder has no PID box here — call it from an ST instruction: TIC(ACTUAL := AI_Temp, SETPOINT := TempSP).', 'Then MOV TIC.Y → AO_H1_Power and a coil Q_H1_On on an always-true rung (a rung with no contacts).', 'Overshooting? Lower KP or lengthen TN. Slow? Raise KP.'] },
+};
+for (const x of LESSONS) {
+  const l = LADDER[x.id];
+  x.ld = { starter: l.starter, solution: l.solution || (x.solution.pous[0].lang === 'LD' ? x.solution : null), hints: l.hints };
+  if (x.solution.pous[0].lang === 'LD') {       // L03: the main solution is ladder — give ST learners an ST one
+    x.ld.solution = x.solution;
+    x.solution = ST('VAR\n  Run : BOOL;\nEND_VAR\nRun := (I_Start OR Run) AND I_Stop;\nQ_M1_Run := Run;\nQ_RunLamp := I_M1_Running;   (* aux contact, not the command *)\n');
+  }
+}
+
 module.exports = { LESSONS };

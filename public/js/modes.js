@@ -10,6 +10,7 @@ const MODES = (() => {
   let W = null;                  // last /api/workspaces
   let M = null;                  // last /api/mission
   let homeMode = null;
+  const langSeg = (cur, key) => `<span class="seg" title="Programming language">${[['ST', 'Structured Text'], ['LD', 'Ladder']].map(([k, l]) => `<button data-${key}="${k}" class="${cur === k ? 'on' : ''}">${l}</button>`).join('')}</span>`;
   const fmtT = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
   // ---------------------------------------------------------------- home
@@ -30,7 +31,7 @@ const MODES = (() => {
     if (homeMode === 'learn') {
       const units = [...new Set(L.map(x => x.unit))];
       sec = `<div class="hsec"><div class="row between"><div><h2>Guided learning path</h2><p class="sub">Fifteen lessons that follow a typical industrial PLC certification syllabus. Each has its own machine, a task, hints, and an automatic grader that tests your program against the real simulation.</p></div>
-          <button class="primary" data-ws="${next.ws}">${done ? 'Continue' : 'Start'}: ${esc(next.title)}</button></div>` +
+          <span class="row"><span class="small muted">New lessons in</span>${langSeg(W.lang, 'hLang')}<button class="primary" data-ws="${next.ws}">${done ? 'Continue' : 'Start'}: ${esc(next.title)}</button></span></div>` +
         units.map(u => `<div class="unit-h">${esc(u)}</div><div class="mlist">` + L.filter(x => x.unit === u).map(x => `<button class="mitem${x.done ? ' done' : ''}${W.current === x.ws ? ' cur' : ''}" data-ws="${x.ws}">
           <span class="num"><span>${+x.id.slice(1)}</span></span><span class="tx"><b>${esc(x.title)}</b><small>${esc(x.summary)}</small>
           <span class="meta"><span class="chipk">${x.minutes} min</span>${x.done ? '<span class="chipk sandbox">passed</span>' : x.best ? `<span class="chipk">${x.best}/${x.objectives} objectives</span>` : x.started ? '<span class="chipk">started</span>' : ''}</span></span></button>`).join('') + '</div>').join('') + '</div>';
@@ -41,7 +42,7 @@ const MODES = (() => {
           <span class="chipk">par ${fmtT(x.par)}</span>${x.best ? `<span class="score-b">best ${x.best}</span>` : x.started ? '<span class="chipk">in progress</span>' : ''}</span></span></button>`).join('')}</div></div>`;
     } else if (homeMode === 'build') {
       sec = `<div class="hsec"><h2>Your machines</h2><p class="sub">Assemble a machine from tanks, valves, pumps, heaters, motors, conveyors, cylinders and an operator panel, then program it in ST or ladder. Every part simulates real behaviour: flow, heat, overloads, jams.</p>
-        <div class="newsb"><input id="nsName" placeholder="Machine name, e.g. Mixing skid" maxlength="48"><select id="nsTpl">${W.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select><button class="primary" id="nsGo" ${can('engineer') ? '' : 'disabled'}>Create machine</button></div>
+        <div class="newsb"><input id="nsName" placeholder="Machine name, e.g. Mixing skid" maxlength="48"><select id="nsTpl">${W.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select>${langSeg(W.lang, 'hLang')}<button class="primary" id="nsGo" ${can('engineer') ? '' : 'disabled'}>Create machine</button></div>
         <div class="mlist">${W.sandboxes.map(x => `<div class="sbrow"><button class="mitem${W.current === x.id ? ' cur' : ''}" data-ws="${x.id}"><span class="num">${SBX.glyph('conveyor')}</span><span class="tx"><b>${esc(x.name)}</b><small>${x.components} parts · ${x.updated ? 'edited ' + new Date(x.updated).toLocaleDateString() : ''}</small></span></button>
           <span class="acts"><button data-ren="${x.id}" ${can('engineer') ? '' : 'disabled'}>Rename</button><button data-delsb="${x.id}" class="danger" ${can('engineer') ? '' : 'disabled'}>Delete</button></span></div>`).join('') || '<p class="muted">No machines yet — create one above.</p>'}</div></div>`;
     } else {
@@ -60,9 +61,13 @@ const MODES = (() => {
       <p class="muted small" style="margin-top:30px">Progress is saved per user. <a href="#" id="hReset">Reset my progress</a></p></div>`;
     $$('#home [data-mode]').forEach(b => b.onclick = () => { homeMode = b.dataset.mode; renderHome(); });
     $$('#home [data-ws]').forEach(b => b.onclick = () => go(b.dataset.ws));
+    $$('#home [data-hLang]').forEach(b => b.onclick = async () => {
+      const r = await api('POST', '/api/lang', { lang: b.dataset.hlang }); if (!r.ok) return toast(r.msg || 'Needs the engineer role', true);
+      W.lang = r.lang; renderHome();
+    });
     if ($('#hClose')) $('#hClose').onclick = closeHome;
     if ($('#nsGo')) $('#nsGo').onclick = async () => {
-      const r = await api('POST', '/api/sandbox/new', { name: $('#nsName').value.trim() || 'My machine', template: $('#nsTpl').value });
+      const r = await api('POST', '/api/sandbox/new', { name: $('#nsName').value.trim() || 'My machine', template: $('#nsTpl').value, lang: W.lang });
       if (!r.ok) return toast(r.msg || 'Could not create', true);
       await entered('build');
     };
@@ -114,7 +119,7 @@ const MODES = (() => {
     const passed = m.results ? m.results.filter(r => r.pass).length : 0;
     $('#mission').innerHTML = `<div class="mission">
       <div class="mhead"><span class="chipk lesson">Lesson ${m.index} of ${m.total}</span><span class="crumb">${esc(m.unit)} · about ${m.minutes} min</span>${m.done ? '<span class="chipk sandbox">passed</span>' : ''}</div>
-      <h2>${esc(m.title)}</h2><p class="lead">${esc(m.summary)}</p>
+      <div class="row between"><h2>${esc(m.title)}</h2><span class="row"><span class="small muted">Language</span>${langSeg(m.lang, 'mlang')}</span></div><p class="lead">${esc(m.summary)}</p>
       <details class="card prose" ${m.done ? '' : 'open'}><summary>Background</summary>${m.theory}</details>
       <div class="task prose"><b>Your task</b>${m.task}</div>
       ${m.done && m.results && passed === m.results.length ? `<div class="done-banner"><span class="big">✓</span><div><b>Lesson passed.</b><div class="small muted">${m.solutionViewed ? 'You looked at the reference solution — try the next one without it!' : m.hints.length ? `Passed with ${m.hints.length} hint${m.hints.length > 1 ? 's' : ''}.` : 'Passed without hints. Nice work.'}</div></div><span class="grow"></span>${m.next ? `<button class="primary" id="mNext">Next lesson →</button>` : '<b>Path complete!</b>'}</div>` : ''}
@@ -136,6 +141,19 @@ const MODES = (() => {
       renderMission();
     };
     $('#mHint').onclick = async () => { await api('POST', '/api/hint', {}); renderMission(); };
+    $$('#mission [data-mlang]').forEach(b => b.onclick = () => {
+      const lang = b.dataset.mlang; if (lang === m.lang) return;
+      const name = lang === 'LD' ? 'Ladder Diagram' : 'Structured Text';
+      modal(`<h3>Do this lesson in ${name}?</h3><p class="muted">The lesson program is replaced by the ${name} starting point and downloaded. Your current ${m.lang === 'LD' ? 'ladder' : 'ST'} code for this lesson is discarded. New lessons will also start in ${name}.</p>
+        <div class="row" style="justify-content:flex-end"><button id="xNo">Cancel</button><button id="xYes" class="primary">Switch to ${name}</button></div>`);
+      $('#xNo').onclick = closeModal;
+      $('#xYes').onclick = async () => {
+        closeModal();
+        const r = await api('POST', '/api/lang', { lang, lesson: true });
+        if (r.ok === false && !r.lang) return toast(r.msg || 'Could not switch', true);
+        await refreshProject(true); renderMission(); toast(`Lesson now in ${name}`);
+      };
+    });
     $('#mSol').onclick = () => {
       modal(`<h3>Show the reference solution?</h3><p class="muted">It is loaded into the editor (not downloaded) so you can study it, replacing your current code. Your progress will note that you looked.</p>
         <div class="row" style="justify-content:flex-end"><button id="xNo">Cancel</button><button id="xYes" class="primary">Load solution into editor</button></div>`);
