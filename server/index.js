@@ -48,16 +48,34 @@ const rt = new Runtime(plants);
 rt.scanMs = settings.scanMs;
 {
   const first = settings.ws || settings.scen || 'tank';
-  try { rt.load(wsm.load(wsm.valid(first) ? first : 'tank')); } catch (e) { log('Could not load workspace ' + first + ': ' + e.message); rt.load(wsm.fresh('tank')); }
+  try { const r0 = rt.load(wsm.load(wsm.valid(first) ? first : 'tank')); if (r0.ok) rt.setMode('RUN'); } catch (e) { log('Could not load workspace ' + first + ': ' + e.message); rt.load(wsm.fresh('tank')); }
 }
 function switchTo(ws, user) {
   if (!wsm.valid(ws)) return { ok: false, msg: 'Unknown workspace' };
   try { wsm.save(rt.project); } catch (e) { log('Save failed: ' + e.message); }
   const r = rt.load(wsm.load(ws, user));
+  if (r.ok) rt.setMode('RUN');          // like a PLC powering up with its key switch in RUN
   save();
   return Object.assign({ ok: true, compiled: r.ok, ws }, r.ok ? {} : { msg: r.msg });
 }
 const inChallenge = () => !!(rt.project.challenge && !rt.project.challenge.done);
+/* In a work order the I/O list is part physical installation, part PLC configuration.
+   Physical changes (wiring, contact type, mounting position, switch setpoints, adding/removing devices) need a lockout;
+   PLC-side configuration (tag names, descriptions, signal format/scaling, transmitter range) can be changed online;
+   simulation properties (noise, injected faults) are locked. Returns a reason string when the change is not allowed. */
+const PHYSICAL = { type: 'sensor type', signal: 'what the sensor is wired to', contact: 'contact wiring (NO/NC)', pos: 'mounting position', op: 'switch action', sp: 'switch setpoint', hyst: 'switch differential' };
+function fieldChange(prev, next) {
+  const P = Object.fromEntries(prev.map(x => [x.id, x])), N = Object.fromEntries(next.map(x => [x.id, x]));
+  const lock = !!rt.loto;
+  for (const x of next) {
+    const o = P[x.id];
+    if (!o) { if (!lock) return 'Installing a new field device is physical work — lock out the machine first (Mission → Lockout).'; continue; }
+    for (const k of ['noise', 'fault']) if (String(o[k] ?? '') !== String(x[k] ?? '')) return `'${k}' is a property of the simulation and is locked during a work order.`;
+    if (!lock) for (const k in PHYSICAL) if (String(o[k] ?? '') !== String(x[k] ?? '')) return `${o.tag}: changing the ${PHYSICAL[k]} is field work — lock out the machine first (Mission → Lockout). Tag name, scaling and range can be changed online.`;
+  }
+  if (!lock) for (const o of prev) if (!N[o.id]) return 'Removing a field device is physical work — lock out the machine first (Mission → Lockout).';
+  return null;
+}
 
 // ---------- scan loop ----------
 let last = Date.now(), timer = null;
@@ -138,7 +156,7 @@ const PERM = {
   'PUT /api/sensorfault': 'engineer', 'PUT /api/hmitheme': 'engineer', 'PUT /api/hmi': 'engineer', 'PUT /api/alarms': 'engineer',
   'POST /api/scenario': 'engineer', 'POST /api/workspace': 'engineer', 'POST /api/sandbox/new': 'engineer', 'POST /api/lang': 'engineer', 'POST /api/sandbox/delete': 'engineer',
   'POST /api/sandbox/rename': 'engineer', 'PUT /api/layout': 'engineer', 'POST /api/grade': 'engineer', 'POST /api/hint': 'engineer', 'POST /api/solution': 'engineer',
-  'POST /api/challenge/replace': 'engineer', 'POST /api/challenge/submit': 'engineer', 'POST /api/progress/reset': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
+  'POST /api/challenge/replace': 'engineer', 'POST /api/challenge/loto': 'engineer', 'POST /api/challenge/submit': 'engineer', 'POST /api/progress/reset': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
   'GET /api/users': 'admin', 'GET /api/settings': 'admin', 'PUT /api/settings': 'admin', 'POST /api/users': 'admin', 'POST /api/users/delete': 'admin',
 };
 const PUBLIC = new Set(['/login.html', '/js/login.js', '/setup.html', '/js/setup.js', '/js/theme.js', '/css/app.css', '/healthz', '/api/login', '/api/setup']);
@@ -164,12 +182,18 @@ const routes = {
   'GET /api/events': () => rt.events,
   'POST /api/check': b => rt.download(cleanUnits(b), true, true),
   'POST /api/download': b => {
-    const r = rt.download(cleanUnits(b), b.cold ? false : true);
+    if (inChallenge() && rt.plc === 'RUN' && b.cold) return { ok: false, line: 0, online: true, msg: 'A full (cold) download needs the PLC in STOP (program mode). In a live plant that stops production — STOP the PLC first if you really need it.' };
+    const r = rt.download(cleanUnits(b), b.cold ? false : true, false, { online: inChallenge() && rt.plc === 'RUN' });
+    if (r.ok && inChallenge() && rt.plc === 'RUN') rt.log('PLC', 'Online edit accepted');
     if (r.ok) { rt.log('PLC', b.cold ? 'Program downloaded (cold start: memory reset)' : 'Program downloaded (warm: values kept)'); delete rt.project.draft; save(); }
     return r;
   },
   'PUT /api/source': b => { rt.project.draft = cleanUnits(b); save(); return { ok: true }; },
-  'POST /api/mode': b => rt.setMode(b.mode === 'RUN' ? 'RUN' : 'STOP'),
+  'POST /api/mode': b => {
+    const was = rt.plc, r = rt.setMode(b.mode === 'RUN' ? 'RUN' : 'STOP');
+    if (inChallenge() && was === 'RUN' && rt.plc === 'STOP') { rt.project.challenge.stops = (rt.project.challenge.stops || 0) + 1; rt.log('MAINT', 'PLC stopped — production is down'); save(); }
+    return r;
+  },
   'POST /api/scan': b => { rt.scanMs = Math.min(500, Math.max(10, +b.ms || 50)); startLoop(); save(); return { ok: true }; },
   'POST /api/write': b => ({ ok: rt.write(b.tag, b.value) }),
   'POST /api/force': b => ({ ok: rt.force(b.tag, b.value === undefined ? null : b.value) }),
@@ -179,10 +203,22 @@ const routes = {
     if (b.fault && inChallenge()) return { ok: false, msg: 'Fault injection is disabled during a challenge' };
     const st = rt.st;
     if (b.fault) { st.faults[b.fault] = !!b.value; rt.log('SIM', `Process fault ${b.value ? 'ON' : 'off'}: ${b.fault}`); }
+    else if (b.action && inChallenge() && /^(reset|slug)$/.test(b.action)) return { ok: false, msg: 'Not available on a real plant during a work order' };
+    else if (b.action && inChallenge() && b.action === 'clear' && !rt.loto) return { ok: false, msg: 'Clearing a jam means reaching into the machine — lock it out first (LOTO).' };
     else if (b.action && rt.def.doAction) { rt.def.doAction(st, b.action, b.value, rt); rt.log('SIM', `Plant: ${b.action}${b.value !== undefined ? ' = ' + b.value : ''}`); }
     return { ok: true };
   },
-  'PUT /api/sensors': b => { const r = rt.setSensors(Array.isArray(b.sensors) ? b.sensors : []); save(); return r; },
+  'PUT /api/sensors': b => {
+    const next = Array.isArray(b.sensors) ? b.sensors : [];
+    if (inChallenge()) { const why = fieldChange(rt.project.sensors, next); if (why) return { ok: false, msg: why }; }
+    const prev = JSON.parse(JSON.stringify(rt.project.sensors)), wasRun = rt.plc === 'RUN';
+    const r = rt.setSensors(next);
+    if (!r.ok && inChallenge()) {      // a running plant refuses an edit that would break the program
+      rt.setSensors(prev); if (wasRun) rt.setMode('RUN');
+      return { ok: false, msg: `Change refused: the program would no longer compile (${r.msg}). Online edits that break the running program are rejected.` };
+    }
+    save(); return r;
+  },
   'PUT /api/actfaults': b => {
     if (inChallenge()) return { ok: false, msg: 'Fault injection is disabled during a challenge' }; rt.project.actFaults = b.actFaults || {}; rt.log('SIM', 'Actuator faults updated'); rt.projVer++; save(); return { ok: true }; },
   'PUT /api/sensorfault': b => {
@@ -246,6 +282,12 @@ const routes = {
   },
   'POST /api/hint': () => { const r = wsm.hint(rt.project); save(); return r; },
   'POST /api/solution': () => { const r = wsm.solution(rt.project); save(); return r; },
+  'POST /api/challenge/loto': b => {
+    const c = rt.project.challenge; if (!c || c.done) return { ok: false, msg: 'No active work order' };
+    c.loto = !!b.on; rt.loto = c.loto;
+    rt.log('MAINT', c.loto ? 'Machine locked out and tagged — all outputs de-energised' : 'Lock removed — machine returned to service');
+    rt.projVer++; save(); return { ok: true, loto: c.loto };
+  },
   'POST /api/challenge/replace': b => {
     const r = wsm.replace(rt.project, b.what);
     if (r.ok) { rt.hidden = rt.project.challenge.hidden; rt.log('MAINT', `Replaced ${String(b.what).replace(/^s:/, 'sensor ').replace(/^a:/, 'actuator ')}`); }
@@ -254,6 +296,9 @@ const routes = {
   'POST /api/challenge/submit': (b, me) => {
     if (kindOf(rt.project.ws) !== 'challenge') return { ok: false, msg: 'Not a challenge' };
     if (!rt.program) return { ok: false, msg: 'The PLC has no valid program' };
+    if (rt.project.challenge.loto) return { ok: false, msg: 'Remove your lock first — hand the machine back to production before closing the work order.' };
+    if (Object.keys(rt.forces).length) return { ok: false, msg: `Remove all forces first (${Object.keys(rt.forces).length} active). Never hand a plant back with I/O forced.` };
+    if (rt.plc !== 'RUN') return { ok: false, msg: 'Put the PLC back in RUN before closing the work order.' };
     const r = wsm.submit(rt.project, me.username, String(b.cause || ''));
     rt.log('MAINT', r.pass ? `Work order closed — score ${r.score}` : 'Work order rejected: the fault is still there');
     save(); return r;
@@ -264,10 +309,11 @@ const routes = {
     const keep = b.part && b.part !== 'all' ? b.part : null;
     if (keep === 'src') { delete rt.project.draft; rt.download(unitsOf(d), false); Object.assign(rt.project, unitsOf(d)); rt.projVer++; }
     else if (keep) { rt.project[keep] = d[keep]; if (keep === 'sensors') rt.setSensors(d.sensors); rt.projVer++; }
-    else rt.load(d);
+    else { const r = rt.load(d); if (r.ok) rt.setMode('RUN'); }
     save(); return { ok: true };
   },
-  'POST /api/plant-reset': () => { const f = rt.st.faults; rt.st = rt.def.create(); rt.st.faults = f; rt.log('SIM', 'Plant reset'); return { ok: true }; },
+  'POST /api/plant-reset': () => {
+    if (inChallenge()) return { ok: false, msg: 'Not available on a real plant during a work order' }; const f = rt.st.faults; rt.st = rt.def.create(); rt.st.faults = f; rt.log('SIM', 'Plant reset'); return { ok: true }; },
   'GET /api/me': (b, me) => ({ ok: true, username: me.username, role: me.role, mustChange: !!me.mustChange, noAuth: !!me.noAuth, roles: ROLES }),
   'GET /api/users': () => ({ ok: true, users: auth.list() }),
   'GET /api/settings': (b, me, req) => Object.assign({ ok: true, diag: access.diag(req), modbus: { running: !!mb, port: MODBUS_PORT, clients: mb ? mb.clients() : 0 }, version: pkg.version }, access.view()),

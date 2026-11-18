@@ -14,7 +14,7 @@ class Harness {
     this.rt = new Runtime(plants);
     this.rt.log = () => {};
     const p = JSON.parse(JSON.stringify(project));
-    if (hidden) p.challenge = Object.assign({}, p.challenge, { hidden: JSON.parse(JSON.stringify(hidden)) });
+    if (hidden) p.challenge = Object.assign({}, p.challenge, { hidden: JSON.parse(JSON.stringify(hidden)), loto: false });
     const r = this.rt.load(p);
     if (!r.ok) throw new Fail(`Your program doesn't compile${r.unit ? ' (' + r.unit + ')' : ''}: ${r.msg}`);
     this.rt.setMode('RUN');

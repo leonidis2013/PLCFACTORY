@@ -122,6 +122,10 @@ const MODES = (() => {
       <div class="row between"><h2>${esc(m.title)}</h2><span class="row"><span class="small muted">Language</span>${langSeg(m.lang, 'mlang')}</span></div><p class="lead">${esc(m.summary)}</p>
       <details class="card prose" ${m.done ? '' : 'open'}><summary>Background</summary>${m.theory}</details>
       <div class="task prose"><b>Your task</b>${m.task}</div>
+      <div class="card"><div class="row between"><h3 style="margin:0">Try it</h3><span class="row"><button id="mProg">Open the program</button><button id="mPlant" class="plant-go">Operate the machine</button></span></div>
+        <ol class="rules" style="margin-top:8px"><li>Write your logic in the <b>Program</b> tab and press <b>Download</b>. The PLC is already in <b>RUN</b>, so the change takes effect immediately.</li>
+        <li>Use the <b>operator panel</b> under the machine view (hold a pushbutton, flip a selector) and watch the outputs, the 3D/2D view and the <b>Tags</b> tab.</li>
+        <li>When it behaves, press <b>Check my program</b> below for the graded test.</li></ol></div>
       ${m.done && m.results && passed === m.results.length ? `<div class="done-banner"><span class="big">✓</span><div><b>Lesson passed.</b><div class="small muted">${m.solutionViewed ? 'You looked at the reference solution — try the next one without it!' : m.hints.length ? `Passed with ${m.hints.length} hint${m.hints.length > 1 ? 's' : ''}.` : 'Passed without hints. Nice work.'}</div></div><span class="grow"></span>${m.next ? `<button class="primary" id="mNext">Next lesson →</button>` : '<b>Path complete!</b>'}</div>` : ''}
       <div class="card"><div class="row between"><h3 style="margin:0">Objectives</h3>${m.results ? `<span class="small muted">${passed} of ${m.results.length} passed at the last check</span>` : '<span class="small muted">Not checked yet</span>'}</div>
         ${objList(m.objectives, m.results)}
@@ -140,6 +144,8 @@ const MODES = (() => {
       toast(r.done ? 'All objectives passed!' : `${r.passed} of ${r.total} objectives passed`, !r.done);
       renderMission();
     };
+    $('#mProg').onclick = () => setTab('program');
+    $('#mPlant').onclick = () => { if (matchMedia('(min-width:1150px)').matches) { const el = $('#sbPanel'); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.animate([{ boxShadow: '0 0 0 3px var(--accent)' }, { boxShadow: '0 0 0 0 transparent' }], 1200); } else setTab('plant'); };
     $('#mHint').onclick = async () => { await api('POST', '/api/hint', {}); renderMission(); };
     $$('#mission [data-mlang]').forEach(b => b.onclick = () => {
       const lang = b.dataset.mlang; if (lang === m.lang) return;
@@ -183,12 +189,20 @@ const MODES = (() => {
       <div class="ticket">${m.ticket}</div>
       ${m.done ? `<div class="done-banner"><span class="big">${m.score}</span><div><b>Work order closed.</b><div class="small">Root cause: ${esc((m.causes.find(c => c.id === m.rootCause) || {}).text || m.rootCause)}${b && !b.causeOk ? ' — you picked a different cause' : ''}</div><div class="small muted">Best score: ${m.best}</div></div></div>
         <div class="card"><h3>Score</h3><table class="breakdown"><tr><td>Base</td><td>${b.base}</td></tr><tr><td>Time (${fmtT(b.elapsed)} vs par ${fmtT(m.par)})</td><td>${b.time}</td></tr><tr><td>Hints</td><td>${b.hints}</td></tr>
-          <tr><td>Healthy parts replaced (${b.unneeded})</td><td>${b.parts}</td></tr><tr><td>Root cause</td><td>${b.cause}</td></tr><tr><td>Rejected attempts</td><td>${b.retries}</td></tr><tr class="tot"><td>Total</td><td>${m.score}</td></tr></table>
+          <tr><td>Healthy parts replaced (${b.unneeded})</td><td>${b.parts}</td></tr><tr><td>Production stops (PLC to STOP)</td><td>${b.stops || 0}</td></tr><tr><td>Root cause</td><td>${b.cause}</td></tr><tr><td>Rejected attempts</td><td>${b.retries}</td></tr><tr class="tot"><td>Total</td><td>${m.score}</td></tr></table>
           <div class="mbar"><button id="mRestart">Try again</button><button id="mAll" class="primary">More work orders</button></div></div>` : ''}
       <div class="card"><h3>Acceptance tests</h3>${objList(m.objectives, m.results)}</div>
-      ${m.done ? '' : `<div class="card"><h3>Maintenance</h3><p class="muted small" style="margin:0 0 6px">Replace a field device or repair an actuator. A replacement fixes a hardware failure — but replacing healthy parts costs points. Configuration and program problems are fixed in the I/O and Program tabs.</p>
-        <details><summary class="small">Sensors (${sensors.length})</summary><div class="maint">${sensors.map(([k, n, d]) => `<div class="mi${rep.has(k) ? ' rep' : ''}"><span>${esc(n)}<small>${esc(d)}</small></span><button data-rep="${esc(k)}" ${rep.has(k) || !eng ? 'disabled' : ''}>${rep.has(k) ? 'Replaced' : 'Replace'}</button></div>`).join('')}</div></details>
-        <details><summary class="small">Actuators (${acts.length})</summary><div class="maint">${acts.map(([k, n, d]) => `<div class="mi${rep.has(k) ? ' rep' : ''}"><span>${esc(n)}<small>${esc(d)}</small></span><button data-rep="${esc(k)}" ${rep.has(k) || !eng ? 'disabled' : ''}>${rep.has(k) ? 'Repaired' : 'Repair'}</button></div>`).join('')}</div></details></div>
+      ${m.done ? '' : `<details class="card"><summary>Rules on the plant floor</summary><ul class="rules">
+        <li><b class="y">Online, while running:</b> monitor tags, trends and the ladder; edit program logic and do a normal (warm) download — an online edit; add new variables; change tag names, signal format/scaling and transmitter range in the I/O tab; operate the HMI and panel.</li>
+        <li><b class="n">Needs the PLC in STOP:</b> a full (cold) download, changing data types (UDTs), and changing the type or size of an existing variable. Stopping the PLC stops production and costs 75 points.</li>
+        <li><b class="n">Needs a lockout (LOTO):</b> replacing or repairing devices, rewiring (NO/NC, what a sensor is wired to), moving a sensor, adjusting switch setpoints, adding or removing field devices, clearing jams. While locked out every output is de-energised.</li>
+        <li><b class="n">Before closing:</b> remove your lock, remove all forces, and leave the PLC in RUN. Simulation controls (fault injection, plant reset) are not available.</li></ul></details>
+      <div class="card"><div class="row between"><h3 style="margin:0">Lockout / tagout</h3>
+          <button id="mLoto" class="${m.loto ? 'primary' : 'danger'}" ${eng ? '' : 'disabled'}>${m.loto ? 'Remove lock — return to service' : 'Lock out machine'}</button></div>
+        <p class="muted small" style="margin:6px 0 0">${m.loto ? '🔒 Locked out: all outputs are de-energised. You can replace devices and change field wiring now.' : 'Isolate energy before hands-on work. The PLC keeps scanning, but every output is held off while the lock is on.'}${m.stops ? ` · Production stops so far: ${m.stops}` : ''}</p></div>
+      <div class="card"><h3>Maintenance</h3><p class="muted small" style="margin:0 0 6px">Replace a field device or repair an actuator (needs the lockout). A replacement fixes a hardware failure — but replacing healthy parts costs points. Configuration and program problems are fixed in the I/O and Program tabs.</p>
+        <details><summary class="small">Sensors (${sensors.length})</summary><div class="maint">${sensors.map(([k, n, d]) => `<div class="mi${rep.has(k) ? ' rep' : ''}"><span>${esc(n)}<small>${esc(d)}</small></span><button data-rep="${esc(k)}" ${rep.has(k) || !eng || !m.loto ? 'disabled' : ''} title="${m.loto ? '' : 'Lock out the machine first'}">${rep.has(k) ? 'Replaced' : 'Replace'}</button></div>`).join('')}</div></details>
+        <details><summary class="small">Actuators (${acts.length})</summary><div class="maint">${acts.map(([k, n, d]) => `<div class="mi${rep.has(k) ? ' rep' : ''}"><span>${esc(n)}<small>${esc(d)}</small></span><button data-rep="${esc(k)}" ${rep.has(k) || !eng || !m.loto ? 'disabled' : ''} title="${m.loto ? '' : 'Lock out the machine first'}">${rep.has(k) ? 'Repaired' : 'Repair'}</button></div>`).join('')}</div></details></div>
       <div class="card"><div class="row between"><h3 style="margin:0">Hints</h3><button id="mHint" ${m.hints.length >= m.hintCount ? 'disabled' : ''}>Hint (−100 points) ${m.hints.length}/${m.hintCount}</button></div>${hintList(m.hints)}</div>
       <div class="card"><h3>Close the work order</h3><p class="muted small" style="margin:0 0 8px">The acceptance tests run against your current plant, I/O configuration and the program in the PLC. A rejected attempt costs 50 points.</p>
         <div class="row"><select id="mCause" style="flex:1;min-width:220px"><option value="">Root cause…</option>${m.causes.map(c => `<option value="${c.id}">${esc(c.text)}</option>`).join('')}</select>
@@ -201,12 +215,16 @@ const MODES = (() => {
       toast('Done — the part was swapped'); renderMission();
     });
     if ($('#mHint')) $('#mHint').onclick = async () => { await api('POST', '/api/hint', {}); renderMission(); };
+    if ($('#mLoto')) $('#mLoto').onclick = async () => {
+      const r = await api('POST', '/api/challenge/loto', { on: !m.loto }); if (!r.ok) return toast(r.msg, true);
+      toast(r.loto ? 'Locked out — outputs de-energised' : 'Lock removed — machine back in service'); renderMission();
+    };
     if ($('#mSubmit')) $('#mSubmit').onclick = async e => {
       const cause = $('#mCause').value; if (!cause) return toast('Pick the root cause first', true);
       if (S.editorDirty) toast('Your editor has changes that are not downloaded — testing what is in the PLC.');
       e.target.disabled = true; e.target.textContent = 'Testing…';
       const r = await api('POST', '/api/challenge/submit', { cause });
-      if (!r.ok) { toast(r.msg, true); } else toast(r.pass ? `Work order closed — ${r.score} points` : 'Rejected: the acceptance tests still fail', !r.pass);
+      if (!r.ok) { toast(r.msg, true); e.target.disabled = false; e.target.textContent = 'Submit'; return; } else toast(r.pass ? `Work order closed — ${r.score} points` : 'Rejected: the acceptance tests still fail', !r.pass);
       renderMission();
     };
     const restart = async () => {

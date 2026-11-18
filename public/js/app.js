@@ -96,6 +96,7 @@ $('#runBtn').onclick = async () => {
   const r = await api('POST', '/api/mode', { mode: run ? 'STOP' : 'RUN' });
   if (r && r.ok === false) toast(r.msg, true);
 };
+$('#lotoGo').onclick = e => { e.preventDefault(); setTab('mission'); };
 $('#wsBtn').onclick = () => (document.body.classList.contains('home-open') ? MODES.closeHome() : MODES.openHome());
 // ---------- theme ----------
 const THEME_ICON = {
@@ -127,6 +128,7 @@ function updateHeader() {
   const un = s.alarms.filter(a => !a.acked).length;
   $('#almBadge').textContent = un || '';
   $('#forceBanner').hidden = !Object.keys(s.forces).length;
+  $('#lotoBanner').hidden = !s.loto;
 }
 $('#forceGo').onclick = e => { e.preventDefault(); setTab('tags'); };
 
@@ -503,8 +505,8 @@ function gotoLine(n) {
 async function download(cold) {
   const r = await api('POST', '/api/download', Object.assign(canonUnits(S.units), { cold }));
   showErr(r);
-  if (r.ok) { toast(cold ? 'Downloaded (cold: memory reset)' : 'Downloaded to PLC'); await refreshProject(); }
-  else toast('Compile error — nothing was downloaded', true);
+  if (r.ok) { toast((cold ? 'Downloaded (cold: memory reset)' : 'Downloaded to PLC') + (S.snap && S.snap.plc !== 'RUN' ? ' — the PLC is in STOP: press RUN to try it' : '')); await refreshProject(); }
+  else toast(r.online ? r.msg : 'Compile error — nothing was downloaded', true);
 }
 $('#dlBtn').onclick = () => download(false);
 $('#coldBtn').onclick = () => download(true);
@@ -554,7 +556,7 @@ function buildPlantControls() {
   $('#plantName').textContent = S.info.kind === 'sandbox' ? (S.info.project.name || 'My machine') : S.info.kind === 'lesson' ? 'Lesson machine' : p.name;
   const sb = S.info.scen === 'sandbox';
   $('#fixedPanel').hidden = sb; $('#sbPanel').hidden = !sb; $('#sbPanel')._k = null;
-  $('#plantActions').innerHTML = (p.actions || []).map(a => {
+  $('#plantActions').innerHTML = (p.actions || []).filter(a => S.info.kind !== 'challenge' || !/^(reset|slug)$/.test(a.id)).map(a => {
     if (a.kind === 'toggle') return `<label><input type="checkbox" data-act="${a.id}"> ${esc(a.label)}</label>`;
     if (a.kind === 'level') return `<label>${esc(a.label)} <input type="range" min="0" max="100" step="1" data-act="${a.id}" style="width:110px"> %</label>`;
     if (a.kind === 'select') return `<label>${esc(a.label)} <select data-act="${a.id}">${a.options.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>`;

@@ -98,7 +98,7 @@ class Workspaces {
       if (x.setup) x.setup(p);
       const hidden = clone(x.hidden || {});
       p.challenge = { id: x.id, hidden: { sensors: hidden.sensors || {}, acts: hidden.acts || {} }, planted: [...Object.keys(hidden.sensors || {}).map(t => 's:' + t), ...Object.keys(hidden.acts || {}).map(a => 'a:' + a)],
-        startedAt: Date.now(), hints: 0, replaced: [], attempts: 0, done: false, score: 0 };
+        startedAt: Date.now(), hints: 0, replaced: [], attempts: 0, done: false, score: 0, loto: false, stops: 0 };
       return p;
     }
     const t = TEMPLATES[opts.template] || TEMPLATES.blank;
@@ -195,7 +195,7 @@ class Workspaces {
       return { kind: 'challenge', id: x.id, title: x.title, difficulty: x.difficulty, plant: x.plant, ticket: x.ticket, par: x.par,
         objectives: x.objectives.map(o => ({ id: o.id, text: o.text })), causes: CAUSES[x.plant].map(([id, text]) => ({ id, text })),
         startedAt: c.startedAt, elapsed: Math.round(((c.done ? c.doneAt : Date.now()) - c.startedAt) / 1000), hints: x.hints.slice(0, c.hints), hintCount: x.hints.length,
-        replaced: c.replaced, attempts: c.attempts, done: c.done, score: c.score, breakdown: c.breakdown || null, results: c.results || null, rootCause: c.done ? x.cause : null,
+        replaced: c.replaced, attempts: c.attempts, loto: !!c.loto, stops: c.stops || 0, done: c.done, score: c.score, breakdown: c.breakdown || null, results: c.results || null, rootCause: c.done ? x.cause : null,
         best: (this.prog(user).challenges[x.id] || {}).best || 0 };
     }
     if (k === 'sandbox') return { kind: 'sandbox', name: p.name || p.ws.slice(3), catalog: catalog() };
@@ -235,6 +235,7 @@ class Workspaces {
   // ---------- challenge maintenance & submission ----------
   replace(p, what) {
     const c = p.challenge; if (!c || c.done) return { ok: false, msg: 'No active challenge' };
+    if (!c.loto) return { ok: false, msg: 'Lock out the machine first — field devices are only replaced with the energy isolated (LOTO).' };
     const [kind, name] = String(what || '').split(':');
     if (!name || !['s', 'a'].includes(kind)) return { ok: false, msg: 'Bad request' };
     const key = kind + ':' + name;
@@ -258,7 +259,7 @@ class Workspaces {
     if (!res.every(r => r.pass)) return { ok: true, pass: false, results: res };
     const elapsed = Math.round((Date.now() - c.startedAt) / 1000);
     const unneeded = c.replaced.filter(k => !c.planted.includes(k)).length;
-    const b = { base: 1000, time: -Math.min(500, Math.max(0, elapsed - x.par)), hints: -100 * c.hints, parts: -150 * unneeded, cause: cause === x.cause ? 0 : -200, retries: -50 * Math.max(0, c.attempts - 1) };
+    const b = { base: 1000, time: -Math.min(500, Math.max(0, elapsed - x.par)), hints: -100 * c.hints, parts: -150 * unneeded, stops: -75 * (c.stops || 0), cause: cause === x.cause ? 0 : -200, retries: -50 * Math.max(0, c.attempts - 1) };
     const score = Math.max(100, Object.values(b).reduce((a, v) => a + v, 0));
     Object.assign(c, { done: true, doneAt: Date.now(), score, breakdown: Object.assign(b, { elapsed, unneeded, causeOk: cause === x.cause, chosen: cause }) });
     const pr = this.prog(user), e = pr.challenges[x.id] || (pr.challenges[x.id] = {});

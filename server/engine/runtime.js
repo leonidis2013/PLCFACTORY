@@ -66,6 +66,7 @@ class Runtime {
     this.forces = {};
     this.alm = {}; this.sensorRt = {};
     this.hidden = Object.assign({ sensors: {}, acts: {} }, (project.challenge && project.challenge.hidden) || {});
+    this.loto = !!(project.challenge && project.challenge.loto);
     this.hist = { t: [], v: {} };
     this.buildIo();
     normalizeProject(project);
@@ -150,8 +151,10 @@ class Runtime {
 
   // ---------- program ----------
   /** units = { types, globals, pous:[{id,name,lang,src|rungs}] } */
-  download(units, warm = true, dry = false) {
+  download(units, warm = true, dry = false, opts = {}) {
     units = canonUnits(units);
+    if (opts.online && (units.types || '').replace(/\s+/g, ' ').trim() !== (this.project.types || '').replace(/\s+/g, ' ').trim())
+      return { ok: false, unit: 'Data types', line: 0, online: true, msg: 'Data types (UDTs) cannot be changed while the PLC is running. Stop the PLC and do a full download — in a live plant that stops production.' };
     const tags = {};
     for (const k in this.io) tags[k] = this.io[k];
     const st = [{ name: 'Data types', kind: 'types', src: units.types || '' }, { name: 'Globals', kind: 'globals', src: units.globals || '' }];
@@ -184,6 +187,15 @@ class Runtime {
       return { ok: false, line: 0, msg: String(e.message || e) };
     }
     if (dry) return { ok: true, vars: res.declared.length };
+    if (opts.online) {
+      const sig = t => { try { return JSON.stringify(C.tagType(t)); } catch (e) { return String(t.type); } };
+      for (const K of res.declared) {
+        const n = tags[K], o = this.tags[K];
+        if (!o || o.kind === 'DI' || o.kind === 'AI' || o.kind === 'DO' || o.kind === 'AO' || o.kind === 'SYS') continue;
+        if (n.kind !== o.kind || (n.kind === 'FB' ? n.type !== o.type : sig(n) !== sig(o)))
+          return { ok: false, line: 0, online: true, msg: `'${n.name}' changes data type or size. Existing variables cannot be redeclared online — stop the PLC and do a full download, or add a new variable instead.` };
+      }
+    }
     if (warm) {
       for (const K of res.declared) {
         const n = tags[K], o = this.tags[K];
@@ -312,6 +324,7 @@ class Runtime {
     for (const [name, type] of this.def.actuators) {
       const t = this.io[name.toUpperCase()];
       let v = t.v;
+      if (this.loto) { out[name] = type === 'BOOL' ? false : 0; continue; }   // locked out: energy isolated
       const f = this.hidden.acts[name] || af[name];
       if (f === 'stuck_off') v = type === 'BOOL' ? false : 0;
       else if (f === 'stuck_on') v = type === 'BOOL' ? true : 100;
@@ -468,7 +481,7 @@ class Runtime {
     const tv = this.tagValues();
     return {
       scen: this.project.scen, ws: this.project.ws, plc: this.plc, fault: this.fault, scanTime: this.scanTime, scanMs: this.scanMs, scanCount: this.scanCount,
-      tags: tv.v, fb: tv.fb, forces: this.forces, panel: this.panel,
+      tags: tv.v, fb: tv.fb, forces: this.forces, panel: this.panel, loto: !!this.loto,
       out: this.outputs(),
       plant: this.def.view(this.st), alarms: this.alarmList(),
       almVer: this.almVer, evVer: this.evVer, tagVer: this.tagVer, projVer: this.projVer, t: Date.now(),
