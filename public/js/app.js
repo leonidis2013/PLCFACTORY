@@ -527,17 +527,17 @@ function renderGutter(errLine) {
 }
 code.addEventListener('scroll', () => { $('#gutter').scrollTop = code.scrollTop; });
 const saveDraft = debounce(() => { if (can('engineer')) api('PUT', '/api/source', canonUnits(S.units)); }, 1200);
-function edited(save = true) { S.editorDirty = isDirty(); progStatus(); saveDraft(); liveCheck(); chipsLater(); }
+function edited(save = true) { S.editorDirty = isDirty(); progStatus(); saveDraft(); markErrStale(); chipsLater(); }
+/* Errors are only checked when you press Check or Download. After an edit, an old error stays visible but is
+   marked as being from the last check, so it is never mistaken for the current state of the editor. */
+function markErrStale() {
+  const bar = $('#errBar');
+  if (bar.hidden || bar.classList.contains('stale')) return;
+  bar.classList.add('stale');
+  bar.insertAdjacentHTML('afterbegin', '<span class="stale-tag">From the last check — press Check to re-verify · </span>');
+  if (S.units && curPou() && curPou().lang === 'LD') LDE.showError(0, true);
+}
 const chipsLater = debounce(() => renderIoChips(), 800);
-/* Verify as you type (like an IDE): the error bar always describes what is in the editor now */
-const liveCheck = debounce(async () => {
-  if (!S.units || !can('engineer')) return;
-  if (!S.editorDirty) { showErr({ ok: true }, true); return; }
-  const seq = S.checkSeq = (S.checkSeq || 0) + 1, sent = JSON.stringify(canonUnits(S.units));
-  const r = await api('POST', '/api/check', JSON.parse(sent));
-  if (seq !== S.checkSeq || !S.editorDirty || sent !== JSON.stringify(canonUnits(S.units))) return;   // stale: something changed meanwhile
-  if (r && (r.ok || r.msg)) showErr(r, true);
-}, 700);
 code.addEventListener('input', () => { setUnitText(code.value); renderGutter(S.errLine); edited(); });
 code.addEventListener('keydown', e => {
   if (e.key === 'Tab') { e.preventDefault(); code.setRangeText('  ', code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input')); }
@@ -550,6 +550,7 @@ function progStatus(msg) {
 }
 function showErr(r, quiet) {
   const bar = $('#errBar');
+  bar.classList.remove('stale');
   if (r.ok) { bar.hidden = true; S.errLine = null; renderGutter(); if (S.units && curPou() && curPou().lang === 'LD') LDE.showError(0, quiet); return; }
   const id = r.unit ? unitIdByName(r.unit) : null;
   if (id && id !== S.cur) { if (quiet) { bar.hidden = false; bar.textContent = `${r.unit} · ${r.rung ? 'Rung ' + r.rung + ': ' : 'Line ' + r.line + ': '}${r.msg.replace(/^Rung \d+: /, '')}`; bar.onclick = () => { S.cur = id; renderProgram(); showErr(r); }; return; } S.cur = id; renderProgram(); }

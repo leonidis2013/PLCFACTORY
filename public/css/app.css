@@ -132,6 +132,8 @@ body:not([data-kind=lesson]):not([data-kind=challenge]) [data-t=mission],body:no
 #code:focus{outline:0}
 #code::selection{background:var(--accent-soft)}
 #errBar{background:var(--red-soft);border:1px solid color-mix(in srgb,var(--red) 35%,transparent);color:var(--red);padding:7px 11px;border-radius:var(--r-s);margin-bottom:8px;font:12.5px var(--mono);cursor:pointer}
+#errBar.stale{opacity:.6;border-style:dashed}
+#errBar .stale-tag{font-family:var(--sans);font-size:12px}
 #progStat{font:12px var(--sans)}
 .chips{display:flex;flex-wrap:wrap;gap:5px}
 .chip{font:12px var(--mono);background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-s);padding:2px 8px;cursor:pointer;position:relative;padding-left:14px}
