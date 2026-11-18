@@ -137,6 +137,7 @@ function projectInfo() {
     ws: rt.project.ws, kind: kindOf(rt.project.ws), wsName: wsTitle(), tabs: wsm.lessonTabs(rt.project.ws),
     project: Object.assign({}, rt.project, { challenge: undefined }),
     loaded: rt.loaded,
+    net: rt.net && rt.net.active ? { assign: rt.net.assign, bad: rt.net.bad, why: rt.net.why } : null,
     types: rt.typeList(),
     hasProgram: !!rt.program,
     scanMs: rt.scanMs,
@@ -148,6 +149,8 @@ function projectInfo() {
   };
 }
 // minimum role per API route (GET routes not listed need 'viewer')
+const PC_MSG = 'The engineering/SCADA PC has no network path to the controller — check Build → Network & racks (cables, power, IP).';
+const pcOffline = () => !!(rt.net && rt.net.active && rt.net.scada === false);
 const realistic = me => kindOf(rt.project.ws) === 'lesson' && me && wsm.diff(me.username) === 'realistic';
 const PERM = {
   'POST /api/write': 'operator', 'POST /api/panel': 'operator', 'POST /api/ack': 'operator', 'POST /api/plant': 'operator',
@@ -156,7 +159,7 @@ const PERM = {
   'POST /api/scan': 'engineer', 'POST /api/force': 'engineer', 'PUT /api/sensors': 'engineer', 'PUT /api/actfaults': 'engineer',
   'PUT /api/sensorfault': 'engineer', 'PUT /api/hmitheme': 'engineer', 'PUT /api/hmi': 'engineer', 'PUT /api/alarms': 'engineer',
   'POST /api/scenario': 'engineer', 'POST /api/workspace': 'engineer', 'POST /api/sandbox/new': 'engineer', 'POST /api/lang': 'engineer', 'POST /api/sandbox/delete': 'engineer',
-  'POST /api/sandbox/rename': 'engineer', 'PUT /api/layout': 'engineer', 'PUT /api/network': 'engineer', 'POST /api/grade': 'engineer', 'POST /api/hint': 'engineer', 'POST /api/solution': 'engineer', 'POST /api/difficulty': 'engineer',
+  'POST /api/sandbox/rename': 'engineer', 'PUT /api/layout': 'engineer', 'PUT /api/network': 'engineer', 'POST /api/network/toggle': 'engineer', 'POST /api/grade': 'engineer', 'POST /api/hint': 'engineer', 'POST /api/solution': 'engineer', 'POST /api/difficulty': 'engineer',
   'POST /api/challenge/replace': 'engineer', 'POST /api/challenge/loto': 'engineer', 'POST /api/challenge/submit': 'engineer', 'POST /api/progress/reset': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
   'GET /api/users': 'admin', 'GET /api/settings': 'admin', 'PUT /api/settings': 'admin', 'POST /api/users': 'admin', 'POST /api/users/delete': 'admin',
 };
@@ -183,6 +186,7 @@ const routes = {
   'GET /api/events': () => rt.events,
   'POST /api/check': b => rt.download(cleanUnits(b), true, true),
   'POST /api/download': b => {
+    if (pcOffline()) return { ok: false, errors: [{ unit: '', line: 0, msg: PC_MSG }], msg: PC_MSG };
     if (inChallenge() && rt.plc === 'RUN' && b.cold) return { ok: false, line: 0, online: true, msg: 'A full (cold) download needs the PLC in STOP (program mode). In a live plant that stops production — STOP the PLC first if you really need it.' };
     const r = rt.download(cleanUnits(b), b.cold ? false : true, false, { online: inChallenge() && rt.plc === 'RUN' });
     if (r.ok && inChallenge() && rt.plc === 'RUN') rt.log('PLC', 'Online edit accepted');
@@ -196,8 +200,8 @@ const routes = {
     return r;
   },
   'POST /api/scan': b => { rt.scanMs = Math.min(500, Math.max(10, +b.ms || 50)); startLoop(); save(); return { ok: true }; },
-  'POST /api/write': b => ({ ok: rt.write(b.tag, b.value) }),
-  'POST /api/force': (b, me) => (realistic(me) && b.value !== undefined && b.value !== null ? { ok: false, msg: 'Realistic mode: forcing I/O is off — test with the field devices, like on a live machine.' } : { ok: rt.force(b.tag, b.value === undefined ? null : b.value) }),
+  'POST /api/write': b => (pcOffline() ? { ok: false, msg: PC_MSG } : { ok: rt.write(b.tag, b.value) }),
+  'POST /api/force': (b, me) => (pcOffline() ? { ok: false, msg: PC_MSG } : realistic(me) && b.value !== undefined && b.value !== null ? { ok: false, msg: 'Realistic mode: forcing I/O is off — test with the field devices, like on a live machine.' } : { ok: rt.force(b.tag, b.value === undefined ? null : b.value) }),
   'POST /api/panel': b => { if (b.key in rt.panel) rt.panel[b.key] = !!b.value; return { ok: true }; },
   'POST /api/plant': (b, me) => {
     if (b.fault && !auth.can(me, 'engineer')) return { ok: false, msg: 'Fault injection needs the engineer role' };
@@ -268,11 +272,19 @@ const routes = {
     const TY = ['plc', 'rio', 'sw', 'hmi', 'scada', 'vfd'], MO = ['', 'DI16', 'DO16', 'AI8', 'AO4', 'ENET', 'CPU', 'ADPT'];
     const devices = (Array.isArray(n.devices) ? n.devices : []).slice(0, 64).filter(d => TY.includes(d.type)).map(d => {
       const o = { id: str(d.id, 24), type: d.type, name: str(d.name, 20), x: Math.max(0, Math.min(5000, +d.x || 0)), y: Math.max(0, Math.min(5000, +d.y || 0)), ip: str(d.ip, 15) };
+      if (d.off) o.off = true;
       if (Array.isArray(d.rack) && (d.type === 'plc' || d.type === 'rio')) o.rack = d.rack.slice(0, 17).map(m => (MO.includes(m) ? m : ''));
       return o; });
     const ids = new Set(devices.map(d => d.id));
-    const links = (Array.isArray(n.links) ? n.links : []).slice(0, 256).filter(l => ids.has(l.a) && ids.has(l.b) && l.a !== l.b).map(l => ({ a: l.a, b: l.b }));
-    rt.project.network = { devices, links }; rt.projVer++; save(); return { ok: true };
+    const links = (Array.isArray(n.links) ? n.links : []).slice(0, 256).filter(l => ids.has(l.a) && ids.has(l.b) && l.a !== l.b).map(l => (l.down ? { a: l.a, b: l.b, down: true } : { a: l.a, b: l.b }));
+    const r = rt.setNetwork({ devices, links }); save(); return { ok: true, compiled: r.ok, errors: r.errors };
+  },
+  'POST /api/network/toggle': b => {
+    if (kindOf(rt.project.ws) !== 'sandbox') return { ok: false, msg: 'Only on your own machines' };
+    const n = JSON.parse(JSON.stringify(rt.project.network || { devices: [], links: [] }));
+    if (b.link !== undefined) { const l = n.links[+b.link]; if (!l) return { ok: false, msg: 'No such cable' }; l.down = !l.down; if (!l.down) delete l.down; }
+    else { const d = n.devices.find(x => x.id === b.dev); if (!d) return { ok: false, msg: 'No such device' }; d.off = !d.off; if (!d.off) delete d.off; }
+    rt.setNetwork(n); save(); return { ok: true };
   },
   'PUT /api/layout': b => {
     if (kindOf(rt.project.ws) !== 'sandbox') return { ok: false, msg: 'Only your own machines (sandbox) can be rebuilt' };

@@ -778,3 +778,16 @@ p.tip{background:var(--accent-soft);border-left:3px solid var(--accent);padding:
 .netver li.e{color:var(--red)} .netver li.w{color:var(--amber)}
 .course,.course small,.course b{white-space:normal}
 header #wsBtn .chipk{background:rgba(255,255,255,.14);color:var(--chrome-ink);border-color:transparent}
+/* live network */
+.netsvg .dev.up .ns{fill:#2fbf4f} .netsvg .dev.down .ns{fill:#e5333d;animation:lampb 1s steps(2) infinite}
+.netsvg .dev.down .body{stroke:#e5333d;stroke-dasharray:6 3} .netsvg .dev.off .body{fill:var(--surface-3)} .netsvg .dev.off text{opacity:.55}
+.netsvg .cable.unplug{stroke:#e5333d;stroke-dasharray:7 6;opacity:.75}
+.netstat{margin-top:8px;padding:8px 10px;border-radius:3px;border:1px solid var(--line);font-size:12.5px}
+.netstat.up b{color:var(--green)} .netstat.down{background:var(--red-soft)} .netstat.down b{color:var(--red)}
+.netstat .wires{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px} .netstat .wires span{font-size:12px} .netstat .wires .bad{color:var(--red)}
+.chipk.bad{background:var(--red-soft);color:var(--red);border-color:transparent}
+.wire{font:12px var(--mono);padding:4px 0} .wire.bad{color:var(--red)}
+#hmiWrap{position:relative}
+#hmiComm{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(10,14,20,.78);color:#ffd2d2;text-align:center;z-index:5;font:14px var(--sans)}
+#hmiComm b{font-size:20px;color:#ff6b6b;letter-spacing:.05em}
+#hmiComm[hidden]{display:none}

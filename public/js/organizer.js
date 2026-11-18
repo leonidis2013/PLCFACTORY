@@ -25,11 +25,20 @@ const ORG = (() => {
     const has = kids !== undefined, isOpen = open[id] !== false;
     return `<li class="${has ? 'br' : ''}${isOpen ? ' open' : ''}" data-node="${id}"><div class="nd" ${attrs || ''}>${has ? '<span class="tw"></span>' : '<span class="tw0"></span>'}<span class="ic">${I[icon]}</span><span class="lb">${label}</span>${extra}</div>${has ? `<ul>${kids}</ul>` : ''}</li>`;
   };
+  function netTree() {
+    const n = (S.info.project || {}).network || { devices: [] }, live = (S.snap && S.snap.net) || { online: {} };
+    const lamp = d => `<i class="lamp ${live.online[d.id] ? 'g' : 'r blink'}" style="margin-left:6px"></i>`;
+    const slots = d => (d.rack || []).map((m, i) => node('s-' + d.id + i, 'io', `${i} · ${m || 'Empty'}`, 'data-go="net"')).join('');
+    const plc = n.devices.find(d => d.type === 'plc');
+    const others = n.devices.filter(d => d !== plc && d.type !== 'sw');
+    return [plc ? node('n-' + plc.id, 'ctl', `${esc(plc.name)} local chassis`, 'data-go="net"', slots(plc)) : '',
+      node('eth', 'net', 'Ethernet', 'data-go="net"', others.map(d => node('n-' + d.id, d.type === 'rio' ? 'io' : d.type === 'hmi' ? 'hmi' : 'net', `${esc(d.name)} <small>${esc(d.ip || '')}</small>${lamp(d)}`, 'data-go="net"', d.rack ? slots(d) : undefined)).join(''))].join('');
+  }
   function render() {
     const el = document.getElementById('organizer');
     if (!el || !S.info || !S.units) return;
     const pr = S.info.project || {}, kind = S.info.kind, sens = pr.sensors || [];
-    const k = [S.info.ws, S.info.wsName, kind, S.cur, document.body.dataset.tab, JSON.stringify(S.units.pous.map(p => [p.id, p.name, p.lang])), sens.length, (pr.hmi || []).length, (pr.alarms || []).length, JSON.stringify(open)].join('|');
+    const k = [S.info.ws, S.info.wsName, kind, S.cur, document.body.dataset.tab, JSON.stringify(S.units.pous.map(p => [p.id, p.name, p.lang])), sens.length, (pr.hmi || []).length, (pr.alarms || []).length, JSON.stringify(open), JSON.stringify(S.snap && S.snap.net && S.snap.net.online), JSON.stringify((S.info.project || {}).network || null)].join('|');
     if (k === key) return; key = k;
     const tab = document.body.dataset.tab, cur = id => (tab === 'program' && S.cur === id ? ' cur' : '');
     const t = (name, label) => (tab === name ? ' cur' : '');
@@ -46,7 +55,7 @@ const ORG = (() => {
       ].join(''))}
       ${node('tasks', 'fold', 'Tasks', '', node('mt', 'task', `MainTask <small>${S.snap ? S.snap.scanMs : ''} ms periodic</small>`, '', node('mp', 'prog', 'MainProgram', '', routines)))}
       ${node('types', 'fold', 'Data Types', '', node('udt', 'type', 'User-Defined', `data-go="unit:types" class="nd${cur('types')}"`))}
-      ${node('ioc', 'fold', 'I/O Configuration', '', [
+      ${S.info.net ? node('ioc', 'fold', 'I/O Configuration', '', netTree()) : node('ioc', 'fold', 'I/O Configuration', '', [
         node('io1', 'io', `Slot 1 · Digital in <small>${di}</small>`, `data-go="tab:io" class="nd${t('io')}"`),
         node('io2', 'io', `Slot 2 · Analog in <small>${ai}</small>`, 'data-go="tab:io"'),
         node('io3', 'io', `Slot 3 · Digital out <small>${dq}</small>`, 'data-go="tab:tags"'),
@@ -73,11 +82,12 @@ const ORG = (() => {
   function status() {
     const s = S.snap; if (!s) return;
     const run = s.plc === 'RUN', faulted = !!s.fault, forces = Object.keys(s.forces || {}).length;
-    const ioBad = ((S.info && S.info.project && S.info.project.sensors) || []).some(x => x.fault && x.fault !== 'none');
+    const netBad = !!(s.net && (s.net.bad || Object.values(s.net.online).some(v => !v)));
+    const ioBad = netBad || ((S.info && S.info.project && S.info.project.sensors) || []).some(x => x.fault && x.fault !== 'none');
     const set = (id, cls) => { const e = document.getElementById(id); if (e && e.className !== 'lamp ' + cls) e.className = 'lamp ' + cls; };
     set('lmRun', run ? 'g' : faulted ? 'r' : 'o');
     set('lmOk', faulted ? 'r blink' : 'g');
-    set('lmIo', ioBad ? 'a blink' : 'g');
+    set('lmIo', netBad ? 'r blink' : ioBad ? 'a blink' : 'g');
     set('lmForce', forces ? 'a blink' : 'o');
     setText(document.getElementById('sbMode'), faulted ? 'Faulted' : run ? 'Rem Run' : 'Rem Prog');
     setText(document.getElementById('sbForce'), forces ? `Forces active (${forces})` : 'No forces');

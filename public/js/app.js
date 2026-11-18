@@ -788,6 +788,7 @@ function renderIo() {
       ${extra}
       <label>Fault (live)${sel('fault', s.fault || 'none', faults)}</label>
       <label>PLC value<span class="live" data-live="${esc(s.tag)}">—</span></label>
+      ${S.info.net ? `<label>Wired to<span class="wire${S.info.net.bad[s.tag] ? ' bad' : ''}" title="${esc(S.info.net.bad[s.tag] || '')}">${esc(S.info.net.assign[s.tag] || 'not wired')}${S.info.net.bad[s.tag] ? ' ⚠' : ''}</span></label>` : ''}
       <label>&nbsp;<button data-del="${i}" class="danger">Remove</button></label>
     </div>`;
   }).join('') || '<p class="muted">No sensors — add one.</p>';
@@ -1059,6 +1060,7 @@ function connect() {
   es.onmessage = e => {
     const s = JSON.parse(e.data);
     S.snap = s;
+    { const lost = !!(s.net && s.net.hmi === false), el = $('#hmiComm'); if (el && el.hidden === lost) el.hidden = !lost; }
     if (s.events) { S.events = s.events; if (document.body.dataset.tab === 'alarms') renderEvents(); }
     sample(s);
     if (S.info && (s.projVer !== S.info.projVer || s.tagVer !== S.info.tagVer)) refreshProject();

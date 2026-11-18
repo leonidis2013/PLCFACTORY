@@ -4,6 +4,7 @@
  * forces, alarms, events and trend history. One instance runs in the server.
  */
 const C = require('./compiler');
+const NET = require('./network');
 const LD = require('./ladder');
 const { makeSandbox, normalizeLayout } = require('../plants/sandbox');
 const { truthy, num, coerce, defVal, ELEM } = C;
@@ -100,9 +101,35 @@ class Runtime {
     io.FIRSTSCAN.kind = 'SYS';
     add('ScanCount', 'DINT', 'SYS', 'Number of scans since RUN');
     io.SCANCOUNT.kind = 'SYS';
+    this.net = NET.evaluate(this.project.network, this.netPoints());
+    for (const n in this.net.sys) { add(n, 'BOOL', 'SYS', 'TRUE while this network device is online (connection OK)'); io[n.toUpperCase()].kind = 'SYS'; }
     // keep previous values where possible
     for (const K in io) if (this.io[K] && this.io[K].base === io[K].base) io[K].v = this.io[K].v;
     this.io = io;
+  }
+
+  netPoints() {
+    const pts = [];
+    for (const s of this.project.sensors || []) if (s.tag) pts.push({ tag: s.tag, k: s.type === 'analog' ? 'AI' : 'DI' });
+    for (const [name, type] of this.def.actuators) pts.push({ tag: name, k: type === 'BOOL' ? 'DO' : 'AO' });
+    return pts;
+  }
+
+  /** network edited (or a cable unplugged / device powered off) */
+  setNetwork(network) {
+    this.project.network = network;
+    const before = Object.keys((this.net || {}).sys || {}).join();
+    this.net = NET.evaluate(network, this.netPoints());
+    let r = { ok: true };
+    if (Object.keys(this.net.sys).join() !== before) {
+      this.buildIo();
+      r = this.download(unitsOf(this.project), true);
+      if (!r.ok && this.plc === 'RUN') this.setMode('STOP');
+    }
+    const bad = Object.keys(this.net.bad).length;
+    this.log('SYS', 'Network changed' + (bad ? ` — ${bad} I/O point${bad > 1 ? 's' : ''} faulted` : ''));
+    this.projVer++;
+    return r;
   }
 
   sensorDesc(s) {
@@ -328,6 +355,7 @@ class Runtime {
       const t = this.io[name.toUpperCase()];
       let v = t.v;
       if (this.loto) { out[name] = type === 'BOOL' ? false : 0; continue; }   // locked out: energy isolated
+      if (this.net.bad[name]) { out[name] = type === 'BOOL' ? false : 0; continue; }   // module faulted / not wired: safe state
       const f = this.hidden.acts[name] || af[name];
       if (f === 'stuck_off') v = type === 'BOOL' ? false : 0;
       else if (f === 'stuck_on') v = type === 'BOOL' ? true : 100;
@@ -339,6 +367,10 @@ class Runtime {
   // ---------- scan ----------
   scan(dt) {
     this.readSensors(dt);
+    if (this.net.active) {
+      for (const t in this.net.bad) { const x = this.io[t.toUpperCase()]; if (x && (x.kind === 'DI' || x.kind === 'AI')) x.v = defVal(x.base); }
+      for (const n in this.net.sys) this.io[n.toUpperCase()].v = this.net.sys[n];
+    }
     this.applyForces();
     this.io.FIRSTSCAN.v = this.plc === 'RUN' && this.firstScan;
     if (this.plc === 'RUN' && this.program) {
@@ -485,6 +517,7 @@ class Runtime {
     return {
       scen: this.project.scen, ws: this.project.ws, plc: this.plc, fault: this.fault, scanTime: this.scanTime, scanMs: this.scanMs, scanCount: this.scanCount,
       tags: tv.v, fb: tv.fb, forces: this.forces, panel: this.panel, loto: !!this.loto,
+      net: this.net.active ? { online: this.net.online, hmi: this.net.hmi, scada: this.net.scada, bad: Object.keys(this.net.bad).length } : null,
       out: this.outputs(),
       plant: this.def.view(this.st), alarms: this.alarmList(),
       almVer: this.almVer, evVer: this.evVer, tagVer: this.tagVer, projVer: this.projVer, t: Date.now(),

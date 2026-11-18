@@ -1,11 +1,11 @@
 {
   "name": "plcfactory",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "PLC & SCADA training simulator: IEC 61131-3 Structured Text soft PLC, HMI builder, alarms, trends, Modbus TCP and 2D/3D virtual plants.",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node test/sim.js && node test/lessons.js && node test/challenges.js"
+    "test": "node test/sim.js && node test/lessons.js && node test/challenges.js && node test/network.js"
   },
   "author": "Jerod Ulicki",
   "license": "UNLICENSED",

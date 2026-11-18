@@ -16,7 +16,7 @@ const NET = (() => {
     CPU: { label: 'Controller CPU (embedded Ethernet)', ch: 0 }, ADPT: { label: 'Ethernet adapter', ch: 0 },
   };
   const H = 64;
-  let host = null, o = null, net = null, sel = null, selLink = null, connectFrom = null, drag = null, saveT = 0, issues = null;
+  let srvKey = '', pending = false, host = null, o = null, net = null, sel = null, selLink = null, connectFrom = null, drag = null, saveT = 0, issues = null;
   const uid = () => 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   const clone = x => JSON.parse(JSON.stringify(x));
   const dev = id => net.devices.find(d => d.id === id);
@@ -27,14 +27,14 @@ const NET = (() => {
   function add(type, x, y) {
     const t = TYPES[type], n = net.devices.filter(d => d.type === type).length + 1;
     const d = { id: uid(), type, name: `${t.short}${n}`, x: x == null ? 60 + (net.devices.length % 5) * 180 : x, y: y == null ? 60 + Math.floor(net.devices.length / 5) * 120 : y, ip: type === 'sw' ? '' : nextIp() };
-    if (t.rack) d.rack = type === 'plc' ? ['CPU', 'DI16', 'DO16', '', ''] : ['ADPT', 'DI16', 'DO16', ''];
+    if (t.rack) d.rack = type === 'plc' ? ['CPU', 'DI16', 'DO16', '', ''] : ['ADPT', 'DI16', 'DO16', 'AI8', 'AO4'];
     net.devices.push(d); sel = d.id; selLink = null; changed();
   }
   function starter() {
     net = { devices: [], links: [] };
     add('plc', 40, 50); add('sw', 260, 50); add('hmi', 500, 10); add('scada', 500, 120); add('rio', 260, 230);
     const [p, s, h, c, r] = net.devices; net.links.push({ a: p.id, b: s.id }, { a: s.id, b: h.id }, { a: s.id, b: c.id }, { a: s.id, b: r.id });
-    p.ip = '192.168.1.10'; sel = p.id; changed();
+    p.ip = '192.168.1.10'; p.rack = ['CPU', '', '']; sel = r.id; changed();   // all field I/O on the remote rack
   }
 
   // ---------- verify ----------
@@ -85,23 +85,32 @@ const NET = (() => {
   function svg() {
     const maxX = Math.max(700, ...net.devices.map(d => d.x + TYPES[d.type].w + 40)), maxY = Math.max(420, ...net.devices.map(d => d.y + H + 60));
     const links = net.links.map((l, i) => { const e = linkEnds(l); if (!e) return ''; const [[x1, y1], [x2, y2]] = e, my = Math.max(y1, y2) + 26;
-      return `<path d="M${x1} ${y1} C${x1} ${my} ${x2} ${my} ${x2} ${y2}" class="cable${selLink === i ? ' sel' : ''}" data-link="${i}"/>`; }).join('');
+      return `<path d="M${x1} ${y1} C${x1} ${my} ${x2} ${my} ${x2} ${y2}" class="cable${selLink === i ? ' sel' : ''}${l.down ? ' unplug' : ''}" data-link="${i}"/>`; }).join('');
     const devs = net.devices.map(d => { const t = TYPES[d.type], n = ports(d);
       const pts = Array.from({ length: n }, (_, i) => { const [px, py] = portPos(d, i); return `<rect x="${px - 5}" y="${py - 5}" width="10" height="8" rx="1" class="port${i < used(d) ? ' used' : ''}"/>`; }).join('');
       const rack = d.rack ? `<g>${d.rack.map((m, i) => `<rect x="${d.x + 8 + i * 13}" y="${d.y + 34}" width="11" height="20" class="slot ${m ? 'm-' + m : 'empty'}"/>`).join('')}</g>` : '';
-      return `<g class="dev${sel === d.id ? ' sel' : ''}${connectFrom === d.id ? ' from' : ''}" data-dev="${d.id}">
+      const on = live() ? (live().online[d.id] ? ' up' : ' down') : '';
+      return `<g class="dev${sel === d.id ? ' sel' : ''}${connectFrom === d.id ? ' from' : ''}${on}${d.off ? ' off' : ''}" data-dev="${d.id}">${on ? `<circle cx="${d.x + t.w - 9}" cy="${d.y + H - 10}" r="4.5" class="ns"/>` : ''}
         <rect x="${d.x}" y="${d.y}" width="${t.w}" height="${H}" rx="4" class="body"/><rect x="${d.x}" y="${d.y}" width="5" height="${H}" fill="${t.color}"/>
         <text x="${d.x + 12}" y="${d.y + 17}" class="nm">${esc(d.name)}</text><text x="${d.x + t.w - 8}" y="${d.y + 17}" class="ty" text-anchor="end">${t.short}</text>
         ${d.type !== 'sw' ? `<text x="${d.x + 12}" y="${d.y + (d.rack ? 27 : 36)}" class="ip">${esc(d.ip || 'no IP')}</text>` : `<text x="${d.x + 12}" y="${d.y + 36}" class="ip">${used(d)}/${n} ports</text>`}${rack}${pts}</g>`; }).join('');
     return `<svg class="netsvg" viewBox="0 0 ${maxX} ${maxY}">${links}${devs}</svg>`;
   }
   function props() {
-    if (selLink !== null && net.links[selLink]) { const l = net.links[selLink]; return `<div class="netprops"><b>Cable</b> ${esc(dev(l.a).name)} ↔ ${esc(dev(l.b).name)}<button data-act="dellink" class="danger">Delete cable</button></div>`; }
+    if (selLink !== null && net.links[selLink]) { const l = net.links[selLink]; return `<div class="netprops"><b>Cable</b> ${esc(dev(l.a).name)} ↔ ${esc(dev(l.b).name)}${l.down ? ' <span class="chipk bad">unplugged</span>' : ''}<button data-act="plug" ${o.editable ? '' : 'disabled'}>${l.down ? '⇄ Plug back in' : '⇄ Unplug (live)'}</button><button data-act="dellink" class="danger">Delete cable</button></div>`; }
     const d = sel && dev(sel); if (!d) return '<div class="netprops muted small">Select a device to edit it. Use <b>Connect</b>, then click two devices to run a cable.</div>';
     const t = TYPES[d.type];
     const rack = d.rack ? `<div class="chassis"><div class="ch-h">Chassis · ${d.rack.length} slots <span class="row"><button data-act="slots-">−</button><button data-act="slots+">＋ slot</button></span></div><div class="ch-slots">${d.rack.map((m, i) => `<label class="chs ${m ? 'm-' + m : 'empty'}"><span>Slot ${i}</span>${i === 0 ? `<b>${t.slot0}</b><small>${MODS[t.slot0].label}</small>` : `<select data-slot="${i}" ${o.editable ? '' : 'disabled'}>${Object.entries(MODS).filter(([k]) => k !== 'CPU' && k !== 'ADPT').map(([k, v]) => `<option value="${k}" ${k === m ? 'selected' : ''}>${k || '—'} ${v.label}</option>`).join('')}</select>`}</label>`).join('')}</div></div>` : '';
-    return `<div class="netprops"><span class="chipk">${t.label}</span><label>Name <input data-f="name" value="${esc(d.name)}" maxlength="20"></label>${d.type !== 'sw' ? `<label>IP address <input data-f="ip" value="${esc(d.ip || '')}" maxlength="15" inputmode="decimal"></label><span class="small muted">/24</span>` : ''}<button data-act="del" class="danger">Delete device</button></div>${rack}`;
+    return `<div class="netprops"><span class="chipk">${t.label}</span><label>Name <input data-f="name" value="${esc(d.name)}" maxlength="20"></label>${d.type !== 'sw' ? `<label>IP address <input data-f="ip" value="${esc(d.ip || '')}" maxlength="15" inputmode="decimal"></label><span class="small muted">/24</span>` : ''}<button data-act="power" ${o.editable ? '' : 'disabled'}>${d.off ? '⏻ Power on' : '⏻ Power off (live)'}</button><button data-act="del" class="danger">Delete device</button></div>${statusLine(d)}${rack}`;
   }
+  function live() { return S.snap && S.snap.net; }
+  function statusLine(d) {
+    const n = S.info && S.info.net; if (!live() || !n) return '';
+    const up = live().online[d.id], pts = Object.entries(n.assign).filter(([, a]) => a.startsWith(d.name + ':'));
+    return `<div class="netstat ${up ? 'up' : 'down'}"><b>${up ? '● Online' : '● Offline'}</b>${up ? '' : ` — ${esc((n.why || {})[d.id] || '')}`}${d.type !== 'sw' && d.type !== 'plc' ? ` · tag <code>NET_${esc(d.name.replace(/[^A-Za-z0-9_]/g, '_'))}_OK</code>` : ''}
+      ${pts.length ? `<div class="wires">${pts.map(([t, a]) => `<span class="${n.bad[t] ? 'bad' : ''}"><code>${esc(a.slice(d.name.length + 1))}</code> ${esc(t)}</span>`).join('')}</div>` : ''}</div>`;
+  }
+  async function toggle(body) { const r = await o.api('POST', '/api/network/toggle', body); if (!r.ok) o.toast(r.msg || 'Failed', true); }
   function issuesHtml() {
     if (!issues) return '';
     const { E, W, info } = issues;
@@ -124,6 +133,8 @@ const NET = (() => {
     host.querySelectorAll('[data-slot]').forEach(s => s.onchange = () => { dev(sel).rack[+s.dataset.slot] = s.value; changed(); });
     host.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
       const a = b.dataset.act, d = sel && dev(sel);
+      if (a === 'plug') { const l = net.links[selLink]; l.down = !l.down; if (!l.down) delete l.down; toggle({ link: selLink }); render(); return; }
+      if (a === 'power' && d) { d.off = !d.off; if (!d.off) delete d.off; toggle({ dev: d.id }); render(); return; }
       if (a === 'dellink') { net.links.splice(selLink, 1); selLink = null; }
       if (a === 'del' && d) { net.devices = net.devices.filter(x => x !== d); net.links = net.links.filter(l => l.a !== d.id && l.b !== d.id); sel = null; }
       if (a === 'slots+' && d && d.rack.length < 17) d.rack.push('');
@@ -150,13 +161,22 @@ const NET = (() => {
     issues = issues ? verify() : null; render();
     if (!o.editable) return;
     clearTimeout(saveT);
-    saveT = setTimeout(async () => { const r = await o.api('PUT', '/api/network', { network: net }); if (!r.ok) o.toast(r.msg || 'Could not save the network', true); }, 400);
+    pending = true;
+    saveT = setTimeout(async () => { const r = await o.api('PUT', '/api/network', { network: net }); pending = false; if (!r.ok) o.toast(r.msg || 'Could not save the network', true); }, 400);
   }
   function mount(el, opts) {
     const same = host === el && o && o.ws === opts.ws;
     host = el; o = opts;
+    const k = JSON.stringify(opts.network || null);
     if (!same || !net) { net = clone(opts.network || { devices: [], links: [] }); sel = null; selLink = null; connectFrom = null; issues = null; }
+    else if (k !== srvKey && !pending && !drag) { net = clone(opts.network || { devices: [], links: [] }); if (sel && !dev(sel)) sel = null; if (selLink !== null && !net.links[selLink]) selLink = null; }
+    srvKey = k;
     render();
   }
+  let liveKey = '';
+  setInterval(() => {
+    if (!host || !host.offsetParent || drag || (document.activeElement && host.contains(document.activeElement) && /INPUT|SELECT/.test(document.activeElement.tagName))) return;
+    const k = JSON.stringify([live(), S.info && S.info.net]); if (k !== liveKey) { liveKey = k; render(); }
+  }, 500);
   return { mount, open() { const b = document.querySelector('[data-bsw="net"]'); if (b) b.click(); }, verifyOf(n) { const keep = net; net = n; try { return verify(); } finally { net = keep; } } };
 })();
