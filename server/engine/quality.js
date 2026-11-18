@@ -151,6 +151,19 @@ function simplicity(units, lesson) {
 // ---------------------------------------------------------------- overall
 function letter(s) { return s >= 90 ? 'A' : s >= 80 ? 'B' : s >= 70 ? 'C' : s >= 60 ? 'D' : 'F'; }
 
+/** outputs of the machine that no program writes (coil, set/reset, move/math destination, ST assignment) */
+function undriven(project, outputs) {
+  const written = new Set();
+  for (const p of project.pous || []) {
+    if (p.lang === 'LD') for (const r of p.rungs || []) for (const o of r.outs || []) {
+      if (['COIL', 'NCOIL', 'SET', 'RST'].includes(o.t)) written.add(String(o.a).trim().toUpperCase());
+      if (o.t === 'MOV') written.add(String(o.b).trim().toUpperCase());
+      if (['ADD', 'SUB', 'MUL', 'DIV'].includes(o.t)) written.add(String(o.c).trim().toUpperCase());
+      if (o.t === 'ST') for (const m of String(o.a).matchAll(/([A-Za-z_]\w*)\s*:=/g)) written.add(m[1].toUpperCase());
+    } else for (const m of stripComments(p.src).matchAll(/([A-Za-z_]\w*)\s*:=/g)) written.add(m[1].toUpperCase());
+  }
+  return outputs.filter(n => !written.has(n.toUpperCase()));
+}
 function evaluate(plants, project, lesson, results) {
   const passed = results.filter(r => r.pass).length, total = results.length, all = passed === total;
   const correct = W.correct * passed / total;
@@ -165,7 +178,11 @@ function evaluate(plants, project, lesson, results) {
   const robust = checks.reduce((a, c) => a + (c.pass ? c.weight : 0), 0);
   const simplePts = all ? W.simple * simple.score / 100 : 0;
   const score = Math.round(correct + robust + simplePts);
-  return {
+  let notDriven = [];
+  try { const { makeSandbox, normalizeLayout } = require('../plants/sandbox'); const io = (lesson.task.match(/<code>([QA]O?_[A-Za-z0-9_]+)/g) || []).map(x => x.replace('<code>', ''));
+    const outs = makeSandbox(normalizeLayout(lesson.layout).layout).actuators.map(a => a[0]).filter(n => lesson.task.includes(n) || io.includes(n));
+    notDriven = undriven(project, outs); } catch (e) { notDriven = []; }
+  return { notDriven,
     score, grade: all ? letter(score) : null, passed: all,
     parts: {
       correctness: { pts: Math.round(correct), of: W.correct, detail: `${passed} of ${total} objectives` },

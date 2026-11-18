@@ -124,6 +124,7 @@ const MODES = (() => {
         <div class="gletter g${q.grade || 'X'}">${q.grade || '—'}</div>
         <div class="grow"><h3 style="margin:0">${q.passed ? `Grade ${q.grade} · ${q.score} / 100` : `Not passed yet · ${q.score} / 100`}</h3>
           <div class="small muted">${m.bestGrade ? `Best so far: ${m.bestGrade} (${m.bestScore})` : 'Your best grade is kept.'} Correctness 60 · robustness 25 · simplicity 15.</div></div></div>
+      ${q.notDriven && q.notDriven.length ? `<div class="note warn" style="margin-top:10px">Your program never writes <b>${q.notDriven.map(esc).join(', ')}</b> — no coil, set/reset or assignment drives ${q.notDriven.length > 1 ? 'these outputs' : 'this output'}.</div>` : ''}
       <div class="gparts"><div><span>Correctness</span>${bar(P.correctness.pts, P.correctness.of)}<small>${esc(P.correctness.detail)}</small></div>
         <div><span>Robustness</span>${bar(P.robustness.pts, P.robustness.of)}</div>
         <div><span>Simplicity</span>${bar(P.simplicity.pts, P.simplicity.of)}<small>${q.passed ? '' : 'scored once every objective passes'}</small></div></div>

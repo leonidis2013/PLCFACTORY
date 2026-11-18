@@ -204,6 +204,9 @@ class Runtime {
         else if (n.kind === 'MEM' && o.kind === 'MEM') n.v = merge(n.t, n.v, o.v);
       }
     }
+    // a download passes through program mode: outputs drop, and the new program drives the ones it uses.
+    // (Without this, an output the new program never writes keeps its old value and looks "alive".)
+    for (const K in tags) if ((tags[K].kind === 'DO' || tags[K].kind === 'AO') && this.tags[K]) tags[K].v = tags[K].kind === 'DO' ? false : 0;
     this.tags = tags;
     this.types = res.types;
     this.program = res.fn;
