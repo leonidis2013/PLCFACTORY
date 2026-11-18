@@ -23,18 +23,33 @@ const MODES = (() => {
     try { localStorage.setItem('plcf.seenHome', '1'); } catch (e) {}
   }
   function closeHome() { document.body.classList.remove('home-open'); }
+  let homeCourse = 'plc';
+  const DIFF_NOTE = {
+    easy: 'Easy: hints and the reference solution any time, I/O forcing and simulator shortcuts (set a tank level, inject faults) allowed.',
+    moderate: 'Moderate: each Check unlocks one hint, the reference solution unlocks after 3 Checks. Forcing and simulator shortcuts allowed.',
+    realistic: 'Realistic: like a real commissioning job. No hints, no solution, no forcing and no simulator shortcuts — only the I/O list and the field devices. Passing earns a realistic ✓.' };
+  const diffSeg = (cur, key) => `<span class="seg">${['easy', 'moderate', 'realistic'].map(d => `<button data-${key}="${d}" class="${cur === d ? 'on' : ''}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</span>`;
+  async function setDiff(level) { const r = await api('POST', '/api/difficulty', { level }); if (!r.ok) { toast(r.msg || 'Needs the engineer role', true); return null; } toast(DIFF_NOTE[r.diff]); return r.diff; }
   function renderHome() {
     const L = W.lessons, C = W.challenges, done = L.filter(x => x.done).length, solved = C.filter(x => x.done).length;
     const next = L.find(x => !x.done) || L[L.length - 1];
     const card = (id, cls, title, text, meta, prog) => `<button class="mode-card ${cls}${homeMode === id ? ' on' : ''}" data-mode="${id}"><div class="ic">${ICON[id]}</div><b>${title}</b><span>${text}</span>${prog !== undefined ? `<div class="prog"><i style="width:${prog}%"></i></div>` : ''}<span class="meta">${meta}</span></button>`;
     let sec = '';
     if (homeMode === 'learn') {
-      const units = [...new Set(L.map(x => x.unit))];
-      sec = `<div class="hsec"><div class="row between"><div><h2>Guided learning path</h2><p class="sub">Sixteen lessons that follow a typical industrial PLC certification syllabus. Each has its own machine, a task, hints, and an automatic grader that tests your program against the real simulation.</p></div>
-          <span class="row"><span class="small muted">New lessons in</span>${langSeg(W.lang, 'hLang')}<button class="primary" data-ws="${next.ws}">${done ? 'Continue' : 'Start'}: ${esc(next.title)}</button></span></div>` +
-        units.map(u => `<div class="unit-h">${esc(u)}</div><div class="mlist">` + L.filter(x => x.unit === u).map(x => `<button class="mitem${x.done ? ' done' : ''}${W.current === x.ws ? ' cur' : ''}" data-ws="${x.ws}">
-          <span class="num"><span>${L.indexOf(x) + 1}</span></span><span class="tx"><b>${esc(x.title)}</b><small>${esc(x.summary)}</small>
-          <span class="meta"><span class="chipk">${x.minutes} min</span>${x.grade ? `<span class="gradechip g${x.grade}">${x.grade} · ${x.score}</span>` : ''}${x.done ? '<span class="chipk sandbox">passed</span>' : x.best ? `<span class="chipk">${x.best}/${x.objectives} objectives</span>` : x.started ? '<span class="chipk">started</span>' : ''}</span></span></button>`).join('') + '</div>').join('') + '</div>';
+      const courses = W.courses || [], mods = W.modules || [];
+      if (!courses.find(c => c.id === homeCourse)) homeCourse = (courses[0] || {}).id;
+      const byId = Object.fromEntries(L.map(x => [x.id, x]));
+      const cprog = c => { const ls = mods.filter(m => m.course === c.id).flatMap(m => m.lessons); return [ls.filter(id => (byId[id] || {}).done).length, ls.length]; };
+      const course = courses.find(c => c.id === homeCourse) || {};
+      const item = x => `<button class="mitem${x.done ? ' done' : ''}${x.capstone ? ' cap' : ''}${W.current === x.ws ? ' cur' : ''}" data-ws="${x.ws}">
+          <span class="num"><span>${x.capstone ? '★' : L.indexOf(x) + 1}</span></span><span class="tx"><b>${esc(x.title)}</b><small>${esc(x.summary)}</small>
+          <span class="meta">${x.capstone ? '<span class="chipk cap">capstone</span>' : ''}<span class="chipk">${x.minutes} min</span>${x.grade ? `<span class="gradechip g${x.grade}">${x.grade} · ${x.score}</span>` : ''}${x.real ? '<span class="chipk real" title="Passed in Realistic mode">realistic ✓</span>' : ''}${x.done ? '<span class="chipk sandbox">passed</span>' : x.best ? `<span class="chipk">${x.best}/${x.objectives} objectives</span>` : x.started ? '<span class="chipk">started</span>' : ''}</span></span></button>`;
+      sec = `<div class="hsec"><div class="row between"><div><h2>Courses</h2><p class="sub">${L.length} graded lessons in ${mods.length} modules, each with its own machine and an automatic grader that tests your program against the simulation. Every module ends with a capstone project.</p></div>
+          <span class="row wrap"><span class="small muted">Language</span>${langSeg(W.lang, 'hLang')}<span class="small muted">Difficulty</span>${diffSeg(W.diff, 'hdiff')}<button class="primary" data-ws="${next.ws}">${done ? 'Continue' : 'Start'}: ${esc(next.title)}</button></span></div>
+        <p class="small muted diffnote">${DIFF_NOTE[W.diff] || ''}</p>
+        <div class="courses">${courses.map(c => { const [a, b] = cprog(c); return `<button class="course${c.id === homeCourse ? ' on' : ''}" data-course="${c.id}"><b>${esc(c.title)}</b><small>${esc(c.blurb)}</small><div class="prog"><i style="width:${b ? a / b * 100 : 0}%"></i></div><span class="meta">${a} / ${b} passed</span></button>`; }).join('')}</div>` +
+        mods.filter(m => m.course === course.id).map(m => { const ls = m.lessons.map(id => byId[id]).filter(Boolean), d = ls.filter(x => x.done).length;
+          return `<div class="module"><div class="unit-h"><span>${esc(m.title)}</span><span class="small muted">${d} / ${ls.length}</span></div><div class="mlist">${ls.map(item).join('')}</div></div>`; }).join('') + '</div>';
     } else if (homeMode === 'chal') {
       sec = `<div class="hsec"><h2>Troubleshooting</h2><p class="sub">A working plant with something wrong — a failed sensor, a stuck valve, a bad setting or a programming error. Read the work order, investigate with trends, tags and the I/O view, repair it, then close the work order with the root cause. Faster, cleaner fixes score higher; replacing healthy parts costs points.</p>
         <div class="mlist">${C.map(x => `<button class="mitem${x.done ? ' done' : ''}${W.current === x.ws ? ' cur' : ''}" data-ws="${x.ws}"><span class="num"><span>${+x.id.slice(1)}</span></span>
@@ -60,6 +75,8 @@ const MODES = (() => {
       </div>${sec}
       <p class="muted small" style="margin-top:30px">Progress is saved per user. <a href="#" id="hReset">Reset my progress</a></p></div>`;
     $$('#home [data-mode]').forEach(b => b.onclick = () => { homeMode = b.dataset.mode; renderHome(); });
+    $$('#home [data-course]').forEach(b => b.onclick = () => { homeCourse = b.dataset.course; renderHome(); });
+    $$('#home [data-hdiff]').forEach(b => b.onclick = async () => { const r = await setDiff(b.dataset.hdiff); if (r) { W.diff = r; renderHome(); } });
     $$('#home [data-ws]').forEach(b => b.onclick = () => go(b.dataset.ws));
     $$('#home [data-hLang]').forEach(b => b.onclick = async () => {
       const r = await api('POST', '/api/lang', { lang: b.dataset.hlang }); if (!r.ok) return toast(r.msg || 'Needs the engineer role', true);
@@ -136,8 +153,8 @@ const MODES = (() => {
     const m = M, eng = can('engineer');
     const passed = m.results ? m.results.filter(r => r.pass).length : 0;
     $('#mission').innerHTML = `<div class="mission">
-      <div class="mhead"><span class="chipk lesson">Lesson ${m.index} of ${m.total}</span><span class="crumb">${esc(m.unit)} · about ${m.minutes} min</span>${m.done ? '<span class="chipk sandbox">passed</span>' : ''}</div>
-      <div class="row between"><h2>${esc(m.title)}</h2><span class="row"><span class="small muted">Language</span>${langSeg(m.lang, 'mlang')}</span></div><p class="lead">${esc(m.summary)}</p>
+      <div class="mhead"><span class="chipk lesson">Lesson ${m.index} of ${m.total}</span><span class="crumb">${esc(m.unit)} · about ${m.minutes} min</span>${m.capstone ? '<span class="chipk cap">capstone</span>' : ''}${m.real ? '<span class="chipk real">realistic ✓</span>' : ''}${m.done ? '<span class="chipk sandbox">passed</span>' : ''}</div>
+      <div class="row between"><h2>${esc(m.title)}</h2><span class="row wrap"><span class="small muted">Language</span>${langSeg(m.lang, 'mlang')}<span class="small muted">Difficulty</span>${diffSeg(m.allow.diff, 'mdiff')}</span></div><p class="lead">${esc(m.summary)}</p>
       <details class="card prose" ${m.done ? '' : 'open'}><summary>Background</summary>${m.theory}</details>
       <div class="task prose"><b>Your task</b>${m.task}</div>
       <div class="card"><div class="row between"><h3 style="margin:0">Try it</h3><span class="row"><button id="mProg">Open the program</button><button id="mPlant" class="plant-go">Operate the machine</button></span></div>
@@ -151,8 +168,9 @@ const MODES = (() => {
         <div class="mbar"><button class="primary" id="mCheck" ${eng ? '' : 'disabled'}>Check my program</button>
           <span class="small muted">Grades the program that is <b>in the PLC</b> (download first) in a fast-forward copy of this machine.</span></div></div>
       <div class="card"><div class="row between"><h3 style="margin:0">Stuck?</h3><span class="row">
-          <button id="mHint" ${m.hints.length >= m.hintCount ? 'disabled' : ''}>${m.hints.length ? 'Another hint' : 'Show a hint'} (${m.hints.length}/${m.hintCount})</button>
-          <button id="mSol" class="ghost" ${eng ? '' : 'disabled'}>Reference solution…</button></span></div>${hintList(m.hints)}</div>
+          ${m.allow.diff === 'realistic' ? '<span class="small muted">Realistic mode — no hints or solution. Use the I/O list, the tags and the trend.</span>' : `<button id="mHint" ${m.hints.length >= m.allow.hints ? 'disabled' : ''} title="${m.allow.diff === 'moderate' ? 'Each Check unlocks one hint' : ''}">${m.hints.length ? 'Another hint' : 'Show a hint'} (${m.hints.length}/${m.hintCount})</button>
+          <button id="mSol" class="ghost" ${eng && m.allow.solution ? '' : 'disabled'} title="${m.allow.solution ? '' : 'Unlocks after 3 Checks'}">Reference solution…</button>`}</span></div>
+        ${m.allow.diff === 'moderate' && m.hints.length < m.hintCount ? `<p class="small muted">${m.allow.hints > m.hints.length ? 'A hint is available.' : 'Press Check to unlock the next hint.'} ${m.allow.solution ? '' : `Solution unlocks after 3 Checks (${m.allow.checks}/3).`}</p>` : ''}${hintList(m.hints)}</div>
       <div class="row between" style="margin-top:6px">${m.prev ? '<button id="mPrev" class="ghost">← Previous lesson</button>' : '<span></span>'}<button id="mAll" class="ghost">All lessons</button>${m.next ? '<button id="mNext2" class="ghost">Next lesson →</button>' : '<span></span>'}</div>
     </div>`;
     $('#mCheck').onclick = async e => {
@@ -165,7 +183,8 @@ const MODES = (() => {
     };
     $('#mProg').onclick = () => setTab('program');
     $('#mPlant').onclick = () => { if (matchMedia('(min-width:1150px)').matches) { const el = $('#sbPanel'); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.animate([{ boxShadow: '0 0 0 3px var(--accent)' }, { boxShadow: '0 0 0 0 transparent' }], 1200); } else setTab('plant'); };
-    $('#mHint').onclick = async () => { await api('POST', '/api/hint', {}); renderMission(); };
+    if ($('#mHint')) $('#mHint').onclick = async () => { const r = await api('POST', '/api/hint', {}); if (!r.ok) toast(r.msg, true); renderMission(); };
+    $$('#mission [data-mdiff]').forEach(b => b.onclick = async () => { if (await setDiff(b.dataset.mdiff)) renderMission(); });
     $$('#mission [data-mlang]').forEach(b => b.onclick = () => {
       const lang = b.dataset.mlang; if (lang === m.lang) return;
       const name = lang === 'LD' ? 'Ladder Diagram' : 'Structured Text';
@@ -179,7 +198,7 @@ const MODES = (() => {
         await refreshProject(true); renderMission(); toast(`Lesson now in ${name}`);
       };
     });
-    $('#mSol').onclick = () => {
+    if ($('#mSol')) $('#mSol').onclick = () => {
       modal(`<h3>Show the reference solution?</h3><p class="muted">It is loaded into the editor (not downloaded) so you can study it, replacing your current code. Your progress will note that you looked.</p>
         <div class="row" style="justify-content:flex-end"><button id="xNo">Cancel</button><button id="xYes" class="primary">Load solution into editor</button></div>`);
       $('#xNo').onclick = closeModal;
@@ -263,10 +282,18 @@ const MODES = (() => {
 
   // ---------------------------------------------------------------- build tab
   let cat = null;
+  let buildView = 'machine';
   async function renderBuild() {
     if (!S.info || S.info.kind !== 'sandbox') return;
     if (!cat) { const r = await api('GET', '/api/catalog'); if (r.ok) cat = r; }
-    SBX.Builder.mount($('#build'), { ws: S.info.ws, layout: S.info.project.layout, sensors: S.info.project.sensors, cat, editable: can('engineer'), api, toast,
+    let bm = $('#buildMachine');
+    if (!bm) {
+      $('#build').innerHTML = `<div class="buildsw seg"><button data-bsw="machine" class="on">Machine</button><button data-bsw="net">Network &amp; racks</button></div><div id="buildMachine"></div><div id="buildNet" hidden></div>`;
+      bm = $('#buildMachine');
+      $$('#build [data-bsw]').forEach(b => b.onclick = () => { buildView = b.dataset.bsw; $$('#build [data-bsw]').forEach(x => x.classList.toggle('on', x === b)); $('#buildMachine').hidden = buildView !== 'machine'; $('#buildNet').hidden = buildView !== 'net'; renderBuild(); });
+    }
+    if (buildView === 'net') { NET.mount($('#buildNet'), { ws: S.info.ws, network: S.info.project.network, editable: can('engineer'), api, toast }); return; }
+    SBX.Builder.mount(bm, { ws: S.info.ws, layout: S.info.project.layout, sensors: S.info.project.sensors, cat, editable: can('engineer'), api, toast,
       onApplied: () => refreshProject() });
   }
   function onProject(wsChanged) {

@@ -148,6 +148,7 @@ function projectInfo() {
   };
 }
 // minimum role per API route (GET routes not listed need 'viewer')
+const realistic = me => kindOf(rt.project.ws) === 'lesson' && me && wsm.diff(me.username) === 'realistic';
 const PERM = {
   'POST /api/write': 'operator', 'POST /api/panel': 'operator', 'POST /api/ack': 'operator', 'POST /api/plant': 'operator',
   'POST /api/plant-reset': 'operator', 'PUT /api/pens': 'operator',
@@ -155,7 +156,7 @@ const PERM = {
   'POST /api/scan': 'engineer', 'POST /api/force': 'engineer', 'PUT /api/sensors': 'engineer', 'PUT /api/actfaults': 'engineer',
   'PUT /api/sensorfault': 'engineer', 'PUT /api/hmitheme': 'engineer', 'PUT /api/hmi': 'engineer', 'PUT /api/alarms': 'engineer',
   'POST /api/scenario': 'engineer', 'POST /api/workspace': 'engineer', 'POST /api/sandbox/new': 'engineer', 'POST /api/lang': 'engineer', 'POST /api/sandbox/delete': 'engineer',
-  'POST /api/sandbox/rename': 'engineer', 'PUT /api/layout': 'engineer', 'POST /api/grade': 'engineer', 'POST /api/hint': 'engineer', 'POST /api/solution': 'engineer',
+  'POST /api/sandbox/rename': 'engineer', 'PUT /api/layout': 'engineer', 'PUT /api/network': 'engineer', 'POST /api/grade': 'engineer', 'POST /api/hint': 'engineer', 'POST /api/solution': 'engineer', 'POST /api/difficulty': 'engineer',
   'POST /api/challenge/replace': 'engineer', 'POST /api/challenge/loto': 'engineer', 'POST /api/challenge/submit': 'engineer', 'POST /api/progress/reset': 'engineer', 'POST /api/reset-project': 'engineer', 'POST /api/import': 'engineer', 'GET /api/export': 'engineer',
   'GET /api/users': 'admin', 'GET /api/settings': 'admin', 'PUT /api/settings': 'admin', 'POST /api/users': 'admin', 'POST /api/users/delete': 'admin',
 };
@@ -196,11 +197,12 @@ const routes = {
   },
   'POST /api/scan': b => { rt.scanMs = Math.min(500, Math.max(10, +b.ms || 50)); startLoop(); save(); return { ok: true }; },
   'POST /api/write': b => ({ ok: rt.write(b.tag, b.value) }),
-  'POST /api/force': b => ({ ok: rt.force(b.tag, b.value === undefined ? null : b.value) }),
+  'POST /api/force': (b, me) => (realistic(me) && b.value !== undefined && b.value !== null ? { ok: false, msg: 'Realistic mode: forcing I/O is off — test with the field devices, like on a live machine.' } : { ok: rt.force(b.tag, b.value === undefined ? null : b.value) }),
   'POST /api/panel': b => { if (b.key in rt.panel) rt.panel[b.key] = !!b.value; return { ok: true }; },
   'POST /api/plant': (b, me) => {
     if (b.fault && !auth.can(me, 'engineer')) return { ok: false, msg: 'Fault injection needs the engineer role' };
     if (b.fault && inChallenge()) return { ok: false, msg: 'Fault injection is disabled during a challenge' };
+    if (realistic(me) && (b.fault || /^(reset|ctl:[^:]+:fill)$/.test(b.action || ''))) return { ok: false, msg: 'Realistic mode: no simulator shortcuts (setting levels, resetting the plant, injecting faults).' };
     const st = rt.st;
     if (b.fault) { st.faults[b.fault] = !!b.value; rt.log('SIM', `Process fault ${b.value ? 'ON' : 'off'}: ${b.fault}`); }
     else if (b.action && inChallenge() && /^(reset|slug)$/.test(b.action)) return { ok: false, msg: 'Not available on a real plant during a work order' };
@@ -260,6 +262,18 @@ const routes = {
     if (kindOf(String(b.id)) !== 'sandbox' || !wsm.valid(b.id)) return { ok: false, msg: 'Unknown machine' };
     const p = wsm.load(b.id); p.name = name; wsm.save(p); return { ok: true };
   },
+  'PUT /api/network': b => {
+    if (kindOf(rt.project.ws) !== 'sandbox') return { ok: false, msg: 'Networks and racks are edited on your own machines (Build)' };
+    const n = b.network || {}, str = (v, m) => String(v == null ? '' : v).slice(0, m);
+    const TY = ['plc', 'rio', 'sw', 'hmi', 'scada', 'vfd'], MO = ['', 'DI16', 'DO16', 'AI8', 'AO4', 'ENET', 'CPU', 'ADPT'];
+    const devices = (Array.isArray(n.devices) ? n.devices : []).slice(0, 64).filter(d => TY.includes(d.type)).map(d => {
+      const o = { id: str(d.id, 24), type: d.type, name: str(d.name, 20), x: Math.max(0, Math.min(5000, +d.x || 0)), y: Math.max(0, Math.min(5000, +d.y || 0)), ip: str(d.ip, 15) };
+      if (Array.isArray(d.rack) && (d.type === 'plc' || d.type === 'rio')) o.rack = d.rack.slice(0, 17).map(m => (MO.includes(m) ? m : ''));
+      return o; });
+    const ids = new Set(devices.map(d => d.id));
+    const links = (Array.isArray(n.links) ? n.links : []).slice(0, 256).filter(l => ids.has(l.a) && ids.has(l.b) && l.a !== l.b).map(l => ({ a: l.a, b: l.b }));
+    rt.project.network = { devices, links }; rt.projVer++; save(); return { ok: true };
+  },
   'PUT /api/layout': b => {
     if (kindOf(rt.project.ws) !== 'sandbox') return { ok: false, msg: 'Only your own machines (sandbox) can be rebuilt' };
     const r = rt.setLayout(b.layout || {});
@@ -280,8 +294,9 @@ const routes = {
     rt.log('LEARN', `Check: ${r.passed}/${r.total} objectives passed`);
     save(); return r;
   },
-  'POST /api/hint': () => { const r = wsm.hint(rt.project); save(); return r; },
-  'POST /api/solution': () => { const r = wsm.solution(rt.project); save(); return r; },
+  'POST /api/hint': (b, me) => { const r = wsm.hint(rt.project, me.username); save(); return r; },
+  'POST /api/solution': (b, me) => { const r = wsm.solution(rt.project, me.username); save(); return r; },
+  'POST /api/difficulty': (b, me) => (wsm.setDiff(me.username, String(b.level || '')) ? { ok: true, diff: wsm.diff(me.username) } : { ok: false, msg: 'Unknown difficulty' }),
   'POST /api/challenge/loto': b => {
     const c = rt.project.challenge; if (!c || c.done) return { ok: false, msg: 'No active work order' };
     c.loto = !!b.on; rt.loto = c.loto;

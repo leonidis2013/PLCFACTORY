@@ -12,7 +12,13 @@ const path = require('path');
 const { normalizeProject } = require('./engine/runtime');
 const { grade } = require('./engine/grader');
 const { evaluate } = require('./engine/quality');
-const { LESSONS } = require('./curriculum/lessons');
+const { LESSONS, COURSES, MODULES } = require('./curriculum/lessons');
+/** Difficulty: what the learner may lean on. easy = everything, moderate = earn hints by checking, realistic = plant-floor rules */
+const DIFFS = {
+  easy: { label: 'Easy', hints: 'always', solution: 'always', force: true, sim: true },
+  moderate: { label: 'Moderate', hints: 'per-check', solution: 'after-3', force: true, sim: true },
+  realistic: { label: 'Realistic', hints: 'none', solution: 'none', force: false, sim: false },
+};
 const { CHALLENGES, CAUSES } = require('./curriculum/challenges');
 const { catalog } = require('./plants/sandbox');
 
@@ -153,6 +159,16 @@ class Workspaces {
   prog(user) { return (this.progress[user] = this.progress[user] || { lessons: {}, challenges: {} }); }
   writeProgress() { try { fs.writeFileSync(this.progFile, JSON.stringify(this.progress, null, 1)); } catch (e) { this.log('Could not save progress: ' + e.message); } }
   lang(user) { return (this.progress[user] || {}).lang === 'LD' ? 'LD' : 'ST'; }
+  diff(user) { const d = (this.progress[user] || {}).diff; return DIFFS[d] ? d : 'easy'; }
+  setDiff(user, d) { if (!DIFFS[d]) return false; this.prog(user).diff = d; this.writeProgress(); return true; }
+  /** what the current lesson allows right now */
+  allow(p, user) {
+    const d = this.diff(user), D = DIFFS[d], m = p.mission || {}, x = L[(p.ws || '').slice(7)];
+    const H = x ? (m.lang === 'LD' ? x.ld.hints : x.hints).length : 0, checks = m.checks || 0;
+    const hints = D.hints === 'always' ? H : D.hints === 'per-check' ? Math.min(H, checks) : 0;
+    const solution = D.solution === 'always' || (D.solution === 'after-3' && checks >= 3);
+    return { diff: d, label: D.label, hints, solution, force: D.force, sim: D.sim, checks };
+  }
   setDefaultLang(user, lang) { this.prog(user).lang = lang === 'LD' ? 'LD' : 'ST'; this.writeProgress(); }
   /** switch a lesson to the other language: returns the starter units in that language */
   setLessonLang(p, user, lang) {
@@ -170,7 +186,8 @@ class Workspaces {
     const pr = this.prog(user);
     return {
       practice: Object.values(this.plants).map(p => ({ id: p.id, name: p.name, blurb: p.blurb })),
-      lessons: LESSONS.map(x => ({ id: x.id, ws: 'lesson-' + x.id, unit: x.unit, title: x.title, summary: x.summary, minutes: x.minutes, objectives: x.objectives.length,
+      courses: COURSES, modules: MODULES.map(m => ({ id: m.id, course: m.course, title: m.title, lessons: m.lessons })), diff: this.diff(user), diffs: Object.entries(DIFFS).map(([id, v]) => ({ id, label: v.label })),
+      lessons: LESSONS.map(x => ({ id: x.id, ws: 'lesson-' + x.id, unit: x.unit, module: x.module, course: x.course, capstone: !!x.capstone, real: !!(pr.lessons[x.id] || {}).real, title: x.title, summary: x.summary, minutes: x.minutes, objectives: x.objectives.length,
         done: !!(pr.lessons[x.id] || {}).done, best: (pr.lessons[x.id] || {}).passed || 0, grade: (pr.lessons[x.id] || {}).grade || null, score: (pr.lessons[x.id] || {}).score || 0, started: fs.existsSync(this.file('lesson-' + x.id)) })),
       challenges: CHALLENGES.map(x => ({ id: x.id, ws: 'chal-' + x.id, title: x.title, difficulty: x.difficulty, plant: x.plant, par: x.par,
         best: (pr.challenges[x.id] || {}).best || 0, done: !!(pr.challenges[x.id] || {}).best, started: fs.existsSync(this.file('chal-' + x.id)) })),
@@ -195,6 +212,7 @@ class Workspaces {
         objectives: x.objectives.map(o => ({ id: o.id, text: o.text })), results: m.results || null, quality: m.quality || null,
         bestGrade: (this.prog(user).lessons[x.id] || {}).grade || null, bestScore: (this.prog(user).lessons[x.id] || {}).score || 0, lang: m.lang === 'LD' ? 'LD' : 'ST',
         hints: (m.lang === 'LD' ? x.ld.hints : x.hints).slice(0, m.hints), hintCount: (m.lang === 'LD' ? x.ld.hints : x.hints).length,
+        allow: this.allow(p, user), module: x.module, capstone: !!x.capstone, real: !!(this.prog(user).lessons[x.id] || {}).real,
         solutionViewed: !!m.solution, done: !!(this.prog(user).lessons[x.id] || {}).done, index: i + 1, total: LESSONS.length,
         prev: i > 0 ? 'lesson-' + LESSONS[i - 1].id : null, next: i < LESSONS.length - 1 ? 'lesson-' + LESSONS[i + 1].id : null };
     }
@@ -221,22 +239,25 @@ class Workspaces {
     const passed = res.filter(r => r.pass).length;
     const q = evaluate(this.plants, proj, x, res);
     p.mission = p.mission || { hints: 0, solution: false };
-    p.mission.results = res; p.mission.quality = q;
+    p.mission.results = res; p.mission.quality = q; p.mission.checks = (p.mission.checks || 0) + 1;
     const pr = this.prog(user), e = pr.lessons[x.id] || (pr.lessons[x.id] = {});
     e.passed = Math.max(e.passed || 0, passed);
     if (passed === res.length && !e.done) { e.done = true; e.at = Date.now(); e.hints = p.mission.hints; e.solution = !!p.mission.solution; }
+    if (passed === res.length && this.diff(user) === 'realistic') e.real = true;
     if (q.passed && q.score > (e.score || 0)) { e.score = q.score; e.grade = q.grade; e.gradeLang = q.parts.simplicity.lang; }
     this.writeProgress();
     return { ok: true, results: res, passed, total: res.length, done: passed === res.length, quality: q };
   }
-  hint(p) {
+  hint(p, user) {
     const k = kindOf(p.ws);
+    if (k === 'lesson' && user) { const a = this.allow(p, user); if ((p.mission || {}).hints >= a.hints) return { ok: false, msg: a.diff === 'realistic' ? 'Realistic mode: no hints — on the plant floor you have the manual and the I/O list.' : 'Moderate mode: each Check unlocks the next hint.' }; }
     if (k === 'lesson') { const x = L[p.ws.slice(7)]; p.mission = p.mission || { hints: 0 }; const H = p.mission.lang === 'LD' ? x.ld.hints : x.hints; p.mission.hints = Math.min(H.length, (p.mission.hints || 0) + 1); return { ok: true, hints: H.slice(0, p.mission.hints) }; }
     if (k === 'challenge') { const x = CH[p.ws.slice(5)], c = p.challenge; if (c.done) return { ok: false, msg: 'Challenge finished' }; c.hints = Math.min(x.hints.length, c.hints + 1); return { ok: true, hints: x.hints.slice(0, c.hints) }; }
     return { ok: false, msg: 'No hints here' };
   }
-  solution(p) {
+  solution(p, user) {
     if (kindOf(p.ws) !== 'lesson') return { ok: false, msg: 'Only lessons have a reference solution' };
+    if (user && !this.allow(p, user).solution) return { ok: false, msg: this.diff(user) === 'realistic' ? 'Realistic mode: no reference solution.' : 'Moderate mode: the solution unlocks after 3 Checks.' };
     p.mission = p.mission || { hints: 0 }; p.mission.solution = true;
     const x = L[p.ws.slice(7)];
     return { ok: true, units: clone(p.mission.lang === 'LD' ? x.ld.solution : x.solution) };

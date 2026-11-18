@@ -794,4 +794,32 @@ for (const x of LESSONS) {
   }
 }
 
-module.exports = { LESSONS };
+// ───────── 3.0: courses → modules; the new lessons carry both languages ─────────
+const { NEW } = require('./lessons2');
+const COURSES = [
+  { id: 'plc', title: 'PLC programming', blurb: 'Discrete logic, timers, counters, data and motion — in ladder or Structured Text.' },
+  { id: 'process', title: 'Process control', blurb: 'Analog signals, loops, sequences and batch.' },
+  { id: 'safety', title: 'Safety & diagnostics', blurb: 'Safety relays, monitoring, first-out and discrepancy.' },
+  { id: 'hmi', title: 'HMI', blurb: 'Alarms, command bits, setpoints — what the operator screen needs from the PLC.' },
+  { id: 'scada', title: 'SCADA & networks', blurb: 'Remote control, supervision and plant-wide integration.' },
+];
+const MODULES = [
+  { id: 'fund', course: 'plc', title: 'Fundamentals', lessons: ['L01', 'L02', 'F01', 'L03', 'F02', 'L04', 'F03'] },
+  { id: 'core', course: 'plc', title: 'Timers, counters & edges', lessons: ['L05', 'L06', 'K01', 'L07', 'L08', 'K02', 'K03', 'K04'] },
+  { id: 'motion', course: 'plc', title: 'Data & motion', lessons: ['L13', 'L14', 'D01', 'D02', 'D03'] },
+  { id: 'proc', course: 'process', title: 'Analog & process', lessons: ['L09', 'L10', 'P02', 'P03', 'P01', 'L11', 'L15', 'P04'] },
+  { id: 'safety', course: 'safety', title: 'Machine safety & diagnostics', lessons: ['L16', 'S01', 'S02', 'S03', 'S04'] },
+  { id: 'hmi', course: 'hmi', title: 'Operator interface', lessons: ['L12', 'X01', 'X03'] },
+  { id: 'scada', course: 'scada', title: 'Remote operation', lessons: ['X02', 'X04'] },
+];
+for (const n of NEW) {
+  LESSONS.push(Object.assign({}, n, { theory: n.theory + n.tips.st, starter: n.st.starter, solution: n.st.solution, hints: n.st.hints,
+    ld: { starter: n.ld.starter, solution: n.ld.solution, hints: n.ld.hints, theory: n.theory + n.tips.ld } }));
+}
+const BY = Object.fromEntries(LESSONS.map(x => [x.id, x]));
+const ORDERED = [];
+for (const m of MODULES) for (const id of m.lessons) { const x = BY[id]; if (!x) throw new Error('Unknown lesson ' + id); x.module = m.id; x.course = m.course; x.unit = m.title; ORDERED.push(x); }
+if (ORDERED.length !== LESSONS.length) throw new Error('A lesson is not in any module: ' + LESSONS.filter(x => !x.module).map(x => x.id));
+LESSONS.length = 0; LESSONS.push(...ORDERED);
+
+module.exports = { LESSONS, COURSES, MODULES };

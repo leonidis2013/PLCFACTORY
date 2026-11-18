@@ -2,8 +2,8 @@
 /* PLCFACTORY Ladder Diagram editor + online power-flow view.
    Rung = { comment, rows:[[contact…]…] (parallel branches of series contacts), outs:[output…] } */
 const LDE = (() => {
-  const IN = [['NO', 'Normally open contact  —| |—'], ['NC', 'Normally closed contact  —|/|—'], ['P', 'Rising edge contact  —|P|—'], ['N', 'Falling edge contact  —|N|—'], ['ONS', 'One-shot  —[ONS]—  (storage bit)'], ['CMP', 'Compare  A ? B']];
-  const OUT = [['COIL', 'Coil  —( )—'], ['NCOIL', 'Negated coil  —(/)—'], ['SET', 'Set (latch)  —(S)—'], ['RST', 'Reset (unlatch)  —(R)—'],
+  const IN = [['NO', 'XIC  Examine if closed (NO)  —] [—'], ['NC', 'XIO  Examine if open (NC)  —]/[—'], ['P', 'OSR  Rising edge  —]P[—'], ['N', 'OSF  Falling edge  —]N[—'], ['ONS', 'One-shot  —[ONS]—  (storage bit)'], ['CMP', 'Compare  A ? B']];
+  const OUT = [['COIL', 'OTE  Output energize  —( )—'], ['NCOIL', 'OTE/  Negated output  —(/)—'], ['SET', 'OTL  Output latch  —(L)—'], ['RST', 'OTU  Output unlatch  —(U)—'],
     ['TON', 'TON on-delay timer'], ['TOF', 'TOF off-delay timer'], ['TP', 'TP pulse timer'], ['CTU', 'CTU up counter'], ['CTD', 'CTD down counter'], ['RES', 'RES reset timer/counter'],
     ['MOV', 'MOV move'], ['ADD', 'ADD'], ['SUB', 'SUB'], ['MUL', 'MUL'], ['DIV', 'DIV'], ['BSL', 'BSL shift register left'], ['BSR', 'BSR shift register right'], ['ST', 'ST statement']];
   const OPS = ['=', '<>', '>', '>=', '<', '<='];
@@ -56,7 +56,7 @@ const LDE = (() => {
       case 'ONS': return w('<rect x="14" y="5" width="36" height="20" rx="2" class="gap" style="stroke:var(--text);stroke-width:1.5"/><text x="32" y="19.5" class="lt" style="font-size:10px">ONS</text>');
       case 'P': case 'N': return w(`<rect x="22" y="3" width="20" height="24" class="gap"/><line x1="24" y1="4" x2="24" y2="26" class="bar"/><line x1="40" y1="4" x2="40" y2="26" class="bar"/><text x="32" y="20" class="lt">${t}</text>`);
       case 'COIL': case 'NCOIL': case 'SET': case 'RST': {
-        const l = { COIL: '', NCOIL: '/', SET: 'S', RST: 'R' }[t];
+        const l = { COIL: '', NCOIL: '/', SET: 'L', RST: 'U' }[t];
         return w(`<rect x="18" y="3" width="28" height="24" class="gap"/><path d="M25 4 Q18 15 25 26 M39 4 Q46 15 39 26" class="bar" fill="none"/><text x="32" y="20" class="lt">${l}</text>`);
       }
     }
@@ -66,11 +66,13 @@ const LDE = (() => {
   const opVal = x => { const t = String(x || '').trim(); if (!t) return undefined; if (/^-?\d+(\.\d+)?$/.test(t)) return +t; return App.val(t); };
   function liveText(el) {
     if (!el.a) return '—';
-    if (['TON', 'TOF', 'TP'].includes(el.t)) { const et = App.val(el.a + '.ET'), q = App.val(el.a + '.Q'); return et === undefined ? 'not in PLC yet' : `ET ${(et / 1000).toFixed(1)} s · Q ${q ? 1 : 0}`; }
-    if (['CTU', 'CTD'].includes(el.t)) { const cv = App.val(el.a + '.CV'), pv = App.val(el.a + '.PV'), q = App.val(el.a + '.Q'); return cv === undefined ? 'not in PLC yet' : `CV ${cv} / ${pv !== undefined ? pv : el.b} · Q ${q ? 1 : 0}`; }
+    if (['TON', 'TOF', 'TP'].includes(el.t)) { const et = App.val(el.a + '.ET'), q = App.val(el.a + '.Q'); return et === undefined ? 'not in PLC yet' : `Accum ${(et / 1000).toFixed(1)} s · DN ${q ? 1 : 0}`; }
+    if (['CTU', 'CTD'].includes(el.t)) { const cv = App.val(el.a + '.CV'), pv = App.val(el.a + '.PV'), q = App.val(el.a + '.Q'); return cv === undefined ? 'not in PLC yet' : `Accum ${cv} / ${pv !== undefined ? pv : el.b} · DN ${q ? 1 : 0}`; }
     if (el.t === 'CMP') return `${fmtv(opVal(el.a))} ${el.op || '='} ${fmtv(opVal(el.b))}`;
     return '';
   }
+  const LOGIX = { NO: 'XIC — Examine If Closed', NC: 'XIO — Examine If Open', P: 'OSR — rising edge', N: 'OSF — falling edge', ONS: 'ONS — One Shot', COIL: 'OTE — Output Energize', NCOIL: 'OTE (negated)', SET: 'OTL — Output Latch', RST: 'OTU — Output Unlatch' };
+  const BOXN = { TON: 'Timer On Delay', TOF: 'Timer Off Delay', TP: 'Pulse Timer', CTU: 'Count Up', CTD: 'Count Down', RES: 'Reset', MOV: 'Move', ADD: 'Add', SUB: 'Subtract', MUL: 'Multiply', DIV: 'Divide', BSL: 'Bit Shift Left', BSR: 'Bit Shift Right', CMP: 'Compare', ST: 'Structured Text' };
   function boxHtml(el) {
     const f = FIELDS[el.t] || [];
     let rows = '';
@@ -78,13 +80,14 @@ const LDE = (() => {
     else rows = f.map(([k, lab]) => `<div class="bx-r"><span>${esc2(lab.split(' ')[0])}</span><b>${esc2(el[k] || '?')}</b></div>`).join('');
     // live row is always present so it starts updating as soon as the instance exists in the PLC
     const live = ['TON', 'TOF', 'TP', 'CTU', 'CTD', 'CMP'].includes(el.t) ? `<div class="bx-live">${liveText(el)}</div>` : '';
-    return `<div class="bx"><div class="bx-t">${el.t === 'CMP' ? 'CMP' : el.t}</div>${rows}${live}</div>`;
+    const bits = ['TON', 'TOF', 'TP', 'CTU', 'CTD'].includes(el.t) ? '<div class="bx-bits"><span class="en">EN</span><span class="dn">DN</span></div>' : '';
+    return `<div class="bx"><div class="bx-t"><b>${el.t}</b><small>${BOXN[el.t] || ''}</small></div>${rows}${live}${bits}</div>`;
   }
   function elHtml(el, r, row, i, kind) {
     const id = `${r}:${row}:${i}`;
     const selc = sel === id ? ' sel' : '';
     if (isBox(el.t)) return `<div class="el box ${el.t}${selc}" data-id="${id}" data-k="${kind}">${boxHtml(el)}</div>`;
-    return `<div class="el ${el.t}${selc}" data-id="${id}" data-k="${kind}"><div class="op">${esc2(el.a || '???')}</div>${sym(el)}<div class="lv"></div></div>`;
+    return `<div class="el ${el.t}${selc}" data-id="${id}" data-k="${kind}" title="${LOGIX[el.t] || ''}"><div class="op">${esc2(el.a || '???')}</div>${sym(el)}<div class="lv"></div></div>`;
   }
 
   function render() {
