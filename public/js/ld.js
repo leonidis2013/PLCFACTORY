@@ -121,7 +121,27 @@ const LDE = (() => {
       ? `<label>${lab}<select data-f="op">${OPS.map(o => `<option ${el.op === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>`
       : `<label>${lab}<input data-f="${k}" list="ldTags" value="${esc2(el[k])}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>`).join('');
     return `<div class="ldprops"><label>Instruction<select data-f="t">${types.map(([v, l]) => `<option value="${v}" ${el.t === v ? 'selected' : ''}>${esc2(l)}</option>`).join('')}</select></label>
-      ${fields}<div class="row"><button data-p="left" title="Move left/up">◀</button><button data-p="right" title="Move right/down">▶</button><button data-p="del" class="danger">Delete</button><button data-p="close">Done</button></div></div>`;
+      ${fields}${newTagHtml(el)}<div class="row"><button data-p="left" title="Move left/up">◀</button><button data-p="right" title="Move right/down">▶</button><button data-p="del" class="danger">Delete</button><button data-p="close">Done</button></div></div>`;
+  }
+  /* Undeclared operands get a "create tag" form right in the instruction editor */
+  const TYPES = ['BOOL', 'INT', 'DINT', 'REAL', 'TIME', 'TON', 'TOF', 'TP', 'CTU', 'CTD', 'R_TRIG', 'F_TRIG'];
+  function guessType(el, k) {
+    if (['TON', 'TOF', 'TP', 'CTU', 'CTD'].includes(el.t) && k === 'a') return el.t;
+    if (['NO', 'NC', 'P', 'N', 'COIL', 'NCOIL', 'SET', 'RST'].includes(el.t)) return 'BOOL';
+    if (el.t === 'CMP' || el.t === 'MOV' || ['ADD', 'SUB', 'MUL', 'DIV'].includes(el.t)) return /\./.test(String(el.a) + String(el.b)) ? 'REAL' : 'INT';
+    return 'BOOL';
+  }
+  function missing(el) {
+    if (!opts.isDeclared || el.t === 'ST') return [];
+    return (FIELDS[el.t] || []).filter(([k]) => k !== 'op' && (el.t !== 'RES' || k === 'a') && !((['TON', 'TOF', 'TP', 'CTU', 'CTD'].includes(el.t)) && k === 'b'))
+      .map(([k]) => [k, String(el[k] || '').trim()])
+      .filter(([, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(v) && !/^(TRUE|FALSE)$/i.test(v) && !opts.isDeclared(v));
+  }
+  function newTagHtml(el) {
+    const m = missing(el); if (!opts.editable || !m.length) return '';
+    return m.map(([k, v]) => `<div class="newtag"><span>⚠ <b>${esc2(v)}</b> isn't declared yet.</span>
+      <select data-nt-type="${k}">${TYPES.map(t => `<option ${t === guessType(el, k) ? 'selected' : ''}>${t}</option>`).join('')}</select>
+      <button class="primary" data-nt="${k}">Create tag</button><span class="muted small">adds it to Globals</span></div>`).join('');
   }
   function changed() { opts.onChange(); render(); }
   function bind() {
@@ -157,6 +177,11 @@ const LDE = (() => {
         i.onchange = apply; if (i.tagName === 'INPUT') i.oninput = () => { el[f] = i.value; opts.onChange(); const op = host.querySelector(`.el[data-id="${sel}"] .op`); if (op) op.textContent = i.value || '???'; };
         if (i.tagName === 'INPUT') i.onkeydown = e => { if (e.key === 'Enter') { sel = null; changed(); } };
       });
+      pp.querySelectorAll('[data-nt]').forEach(b => b.onclick = () => {
+        const k = b.dataset.nt, ty = pp.querySelector(`[data-nt-type="${k}"]`).value;
+        opts.declare(String(el[k]).trim(), ty); render();
+      });
+      pp.querySelectorAll('input[data-f]').forEach(i => i.addEventListener('change', () => render()));
       pp.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
         const p = b.dataset.p;
         if (p === 'close') sel = null;

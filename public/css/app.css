@@ -463,6 +463,9 @@ input.rc:hover,input.rc:focus{border-bottom-color:var(--line-2);outline:0}
 .ldprops label{display:flex;flex-direction:column;gap:3px;font:500 11.5px var(--sans);color:var(--muted)}
 .ldprops input{font:13px var(--mono);width:170px}
 .ldprops select{font:13px var(--sans)}
+.newtag{flex-basis:100%;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border-radius:var(--r-s);background:var(--amber-soft);font-size:12.5px}
+.newtag select{font-size:12.5px}
+#errBar .fix select,#errBar .fix button{font-size:12px;padding:2px 8px;margin-left:4px}
 .setup-card{max-width:420px}
 .setup-step{font:600 11.5px var(--sans);letter-spacing:.04em;color:var(--accent);border-bottom:1px solid var(--line);padding-bottom:8px;text-transform:uppercase}
 .login-card .hint{float:right;font:400 11px var(--sans);color:var(--dim)}

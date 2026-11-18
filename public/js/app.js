@@ -422,9 +422,10 @@ function renderProgram() {
   const eng = can('engineer');
   const items = [['types', 'Data types', 'TYPE'], ['globals', 'Globals', 'VAR']].concat(S.units.pous.map((p, i) => [p.id, p.name, p.lang, i + 1]));
   $('#unitBar').innerHTML = items.map(([id, n, l, ord]) => `<button class="unit ${l}${id === S.cur ? ' on' : ''}" data-u="${esc(id)}">${ord ? `<span class="ord">${ord}</span>` : ''}<i>${l}</i>${esc(n)}</button>`).join('') +
-    (eng ? '<button class="unit add" id="addPou">＋ Program</button>' : '');
+    (eng ? '<button class="unit add" id="addPou">＋ Program</button><button class="unit add" id="addTag">＋ Tag</button>' : '');
   $$('#unitBar [data-u]').forEach(b => b.onclick = () => { S.cur = b.dataset.u; showErr({ ok: true }); renderProgram(); });
   if ($('#addPou')) $('#addPou').onclick = addPouDialog;
+  if ($('#addTag')) $('#addTag').onclick = addTagDialog;
   const p = curPou();
   let head = '';
   if (S.cur === 'types') head = '<span class="muted small">User-defined types: <code>TYPE Name : STRUCT … END_STRUCT; END_TYPE</code>. Use them in any program, e.g. <code>Track : ARRAY[0..9] OF VialData;</code></span>';
@@ -444,16 +445,53 @@ function renderProgram() {
   };
   const ld = p && p.lang === 'LD';
   $('#stEditor').hidden = ld; $('#ldEditor').hidden = !ld;
-  if (ld) LDE.mount($('#ldEditor'), p, { editable: eng, onChange: () => edited(), tagNames: ldTagNames });
+  if (ld) LDE.mount($('#ldEditor'), p, { editable: eng, onChange: () => edited(), tagNames: ldTagNames, isDeclared, declare: (n, t) => { declareTag(n, t); toast(`${n} : ${t} added to Globals — Download to use it`); } });
   else { if (code.value !== unitText()) code.value = unitText(); code.readOnly = !eng; renderGutter(S.errLine); }
   progStatus();
   renderTypeList();
 }
-function ldTagNames() { return S.info.tags.map(t => t.name); }
+function ldTagNames() { const n = new Set(S.info.tags.map(t => t.name)); for (const d of draftDecls()) n.add(d); return [...n]; }
+/* names declared in the editor's (not yet downloaded) units */
+function draftDecls() {
+  const out = [], txt = [S.units.globals || ''].concat((S.units.pous || []).filter(p => p.lang !== 'LD').map(p => p.src || '')).join('\n');
+  for (const blk of txt.match(/\bVAR(?:_GLOBAL)?\b[\s\S]*?\bEND_VAR\b/gi) || [])
+    for (const m of blk.matchAll(/^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*:/gm)) for (const n of m[1].split(',')) out.push(n.trim());
+  return out;
+}
+function isDeclared(name) {
+  const N = String(name).toUpperCase();
+  return S.info.tags.some(t => t.name.toUpperCase() === N) || draftDecls().some(d => d.toUpperCase() === N);
+}
+function declareTag(name, type) {
+  if (isDeclared(name)) return;
+  let g = S.units.globals || '';
+  const line = `  ${name} : ${type};`;
+  if (/\bVAR_GLOBAL\b[\s\S]*?\bEND_VAR\b/i.test(g)) g = g.replace(/(\bVAR_GLOBAL\b[\s\S]*?)(\n?\s*END_VAR)/i, (m, a, b) => `${a.replace(/\s*$/, '')}\n${line}${b.startsWith('\n') ? b : '\n' + b.trim()}`);
+  else g = `${g.replace(/\s*$/, '')}${g.trim() ? '\n' : ''}VAR_GLOBAL\n${line}\nEND_VAR\n`;
+  S.units.globals = g;
+  edited();
+}
 function movePou(d) {
   const a = S.units.pous, i = a.indexOf(curPou()), j = i + d;
   if (j < 0 || j >= a.length) return;
   [a[i], a[j]] = [a[j], a[i]]; edited(); renderProgram();
+}
+function addTagDialog() {
+  const types = ['BOOL', 'INT', 'DINT', 'REAL', 'TIME', 'TON', 'TOF', 'TP', 'CTU', 'CTD', 'R_TRIG', 'F_TRIG'].concat((S.info.types || []).map(t => t.name).filter(n => !/^ARRAY/i.test(n)));
+  modal(`<h3>New tag</h3><p class="muted small">Adds a global variable that every program — ST or ladder — can use. Download to put it in the PLC.</p>
+    <div class="row"><label class="f grow">Name<input id="ntName" placeholder="Motor_Running" autocomplete="off" spellcheck="false"></label>
+    <label class="f">Data type<select id="ntType">${[...new Set(types)].map(t => `<option>${esc(t)}</option>`).join('')}</select></label></div>
+    <p id="ntErr" class="warn small"></p>
+    <div class="row" style="justify-content:flex-end"><button id="xNo">Cancel</button><button id="xYes" class="primary">Add tag</button></div>`);
+  $('#ntName').focus();
+  $('#xNo').onclick = closeModal;
+  const go = () => {
+    const n = $('#ntName').value.trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(n)) { $('#ntErr').textContent = 'Use letters, digits and _ (start with a letter).'; return; }
+    if (isDeclared(n)) { $('#ntErr').textContent = `${n} already exists.`; return; }
+    declareTag(n, $('#ntType').value); closeModal(); renderProgram(); toast(`${n} added to Globals — press Download`);
+  };
+  $('#xYes').onclick = go; $('#ntName').onkeydown = e => { if (e.key === 'Enter') go(); };
 }
 function addPouDialog() {
   modal(`<h3>Add a program</h3><form id="npF" class="menu">
@@ -505,6 +543,15 @@ function showErr(r) {
   const id = r.unit ? unitIdByName(r.unit) : null;
   if (id && id !== S.cur) { S.cur = id; renderProgram(); }
   bar.hidden = false; bar.textContent = `${r.unit ? r.unit + ' · ' : ''}${r.rung ? '' : 'Line ' + r.line + ': '}${r.msg}`;
+  const und = /Undeclared variable '([A-Za-z_]\w*)'/.exec(r.msg || '');
+  if (und && can('engineer')) {
+    const n = und[1], fix = document.createElement('span');
+    fix.className = 'fix';
+    fix.innerHTML = ` <select>${['BOOL', 'INT', 'DINT', 'REAL', 'TIME', 'TON', 'TOF', 'TP', 'CTU', 'CTD', 'R_TRIG', 'F_TRIG'].map(t => `<option>${t}</option>`).join('')}</select> <button class="primary">Declare ${esc(n)} in Globals</button>`;
+    fix.onclick = e => e.stopPropagation();
+    fix.querySelector('button').onclick = () => { declareTag(n, fix.querySelector('select').value); bar.hidden = true; renderProgram(); toast(`${n} declared — press Download`); };
+    bar.appendChild(fix);
+  }
   if (r.rung) { S.errLine = null; LDE.showError(r.rung); bar.onclick = () => LDE.showError(r.rung); }
   else { S.errLine = r.line; renderGutter(r.line); bar.onclick = () => gotoLine(r.line); gotoLine(r.line); }
 }
