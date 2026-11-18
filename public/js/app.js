@@ -451,7 +451,7 @@ function renderProgram() {
   progStatus();
   renderTypeList();
 }
-function ldTagNames() { const n = new Set(S.info.tags.map(t => t.name)); for (const d of draftDecls()) n.add(d); return [...n]; }
+function ldTagNames() { const c = tagCatalog(); return [...c.io.map(t => t.n), ...c.mem.map(t => t.n), ...[].concat(...c.fb.map(f => f.members.map(m => m.n)))]; }
 /* names declared in the editor's (not yet downloaded) units */
 function draftDecls() {
   const out = [], txt = [S.units.globals || ''].concat((S.units.pous || []).filter(p => p.lang !== 'LD').map(p => p.src || '')).join('\n');
@@ -527,7 +527,8 @@ function renderGutter(errLine) {
 }
 code.addEventListener('scroll', () => { $('#gutter').scrollTop = code.scrollTop; });
 const saveDraft = debounce(() => { if (can('engineer')) api('PUT', '/api/source', canonUnits(S.units)); }, 1200);
-function edited(save = true) { S.editorDirty = isDirty(); progStatus(); saveDraft(); liveCheck(); }
+function edited(save = true) { S.editorDirty = isDirty(); progStatus(); saveDraft(); liveCheck(); chipsLater(); }
+const chipsLater = debounce(() => renderIoChips(), 800);
 /* Verify as you type (like an IDE): the error bar always describes what is in the editor now */
 const liveCheck = debounce(async () => {
   if (!S.units || !can('engineer')) return;
@@ -594,13 +595,51 @@ $('#exampleBtn').onclick = () => {
     await refreshProject(true);
   };
 };
+/* Every name a program can use: I/O, program variables (incl. UDT members) and function-block members
+   (Batch.Q, Warn.ET …) — from the PLC, plus declarations in the editor that aren't downloaded yet */
+function tagCatalog() {
+  const IO = { DI: 1, AI: 1, DO: 1, AO: 1, SYS: 1 }, hidden = n => /^_L\d+_/i.test(n);
+  const io = [], mem = [], fb = [], seen = new Set();
+  const fbMembers = (name, type) => { const d = S.meta.fbTypes[String(type).toUpperCase()]; return d ? Object.keys(d.out).map(k => ({ n: `${name}.${k}`, type: d.out[k], out: true })).concat(Object.keys(d.in).map(k => ({ n: `${name}.${k}`, type: d.in[k], out: false }))) : []; };
+  for (const t of S.info.tags) {
+    if (hidden(t.name) || seen.has(t.name.toUpperCase())) continue;
+    seen.add(t.name.toUpperCase());
+    if (IO[t.kind]) io.push({ n: t.name, type: t.type, kind: t.kind, desc: t.desc });
+    else if (t.kind === 'FB') fb.push({ n: t.name, type: t.type, members: fbMembers(t.name, t.type) });
+    else mem.push({ n: t.name, type: t.type, desc: t.desc });
+  }
+  for (const d of draftDeclTypes()) {
+    if (seen.has(d.name.toUpperCase())) continue;
+    seen.add(d.name.toUpperCase());
+    if (S.meta.fbTypes[d.type.toUpperCase()]) fb.push({ n: d.name, type: d.type.toUpperCase(), members: fbMembers(d.name, d.type), draft: true });
+    else mem.push({ n: d.name, type: d.type, draft: true });
+  }
+  return { io, mem, fb };
+}
+function draftDeclTypes() {
+  const out = [], txt = [S.units.globals || ''].concat((S.units.pous || []).filter(p => p.lang !== 'LD').map(p => p.src || '')).join('\n').replace(/\(\*[\s\S]*?\*\)/g, ' ');
+  for (const blk of txt.match(/\bVAR(?:_GLOBAL)?\b[\s\S]*?\bEND_VAR\b/gi) || [])
+    for (const part of blk.replace(/^\s*VAR(?:_GLOBAL)?\b/i, '').replace(/\bEND_VAR\b\s*$/i, '').split(';')) {
+      const m = /^\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*:\s*([A-Za-z_][\w]*(?:\s*\[[^\]]*\]\s*OF\s*\w+)?)/i.exec(part);
+      if (m) for (const n of m[1].split(',')) out.push({ name: n.trim(), type: m[2].trim() });
+    }
+  return out;
+}
+function insertTag(name) {
+  if (!$('#stEditor').hidden && !code.readOnly) { code.focus(); code.setRangeText(name, code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input')); return; }
+  const inp = (S.ldFocus && S.ldFocus.isConnected && S.ldFocus) || $('#ldEditor .ldprops input[data-f]');
+  if (inp && !$('#ldEditor').hidden) { inp.value = name; inp.dispatchEvent(new Event('input')); inp.dispatchEvent(new Event('change')); inp.focus(); return; }
+  try { navigator.clipboard.writeText(name); toast('Copied ' + name + ' — select a ladder instruction to insert tags directly'); } catch (e) {}
+}
+$('#ldEditor').addEventListener('focusin', e => { if (e.target.matches('.ldprops input[data-f]')) S.ldFocus = e.target; });
 function renderIoChips() {
-  const kinds = { DI: 'in', AI: 'in', DO: 'out', AO: 'out', SYS: 'sys' };
-  $('#ioList').innerHTML = S.info.tags.filter(t => kinds[t.kind]).map(t => `<span class="chip ${t.kind}" data-n="${esc(t.name)}" title="${esc(t.desc)}">${esc(t.name)}<i>${t.type}</i></span>`).join('');
-  $$('#ioList .chip').forEach(c => c.onclick = () => {
-    if ($('#stEditor').hidden || code.readOnly) { try { navigator.clipboard.writeText(c.dataset.n); toast('Copied ' + c.dataset.n); } catch (e) {} return; }
-    code.focus(); code.setRangeText(c.dataset.n, code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input'));
-  });
+  const c = tagCatalog(), chip = (n, type, cls, title, draft) => `<span class="chip ${cls}${draft ? ' draft' : ''}" data-n="${esc(n)}" title="${esc(title || '')}${draft ? ' (not downloaded yet)' : ''}">${esc(n)}<i>${esc(type)}</i></span>`;
+  const grp = (title, html) => html ? `<div class="chipgrp"><div class="chiph">${title}</div><div class="chips">${html}</div></div>` : '';
+  $('#ioList').innerHTML =
+    grp('I/O & system', c.io.map(t => chip(t.n, t.type, t.kind, t.desc)).join('')) +
+    grp('Program variables', c.mem.map(t => chip(t.n, t.type, 'MEM', t.desc, t.draft)).join('')) +
+    grp('Function blocks', c.fb.map(f => `<span class="fbgrp">${chip(f.n, f.type, 'FB', '', f.draft)}${f.members.filter(m => m.out).map(m => chip(m.n, m.type, 'FBM', 'output')).join('')}${f.members.filter(m => !m.out).map(m => chip(m.n, m.type, 'FBM in', 'input')).join('')}</span>`).join(''));
+  $$('#ioList .chip').forEach(ch => ch.onclick = () => insertTag(ch.dataset.n));
   if (!$('#fbList')) return;
   $('#fbList').innerHTML = '<table>' + Object.entries(S.meta.fbTypes).map(([k, v]) => `<tr><td class="nm"><code>${k}</code></td><td>${esc(v.desc)}<br><span class="muted">in: ${Object.keys(v.in).join(', ')} · out: ${Object.keys(v.out).join(', ')}</span></td></tr>`).join('') + '</table>';
 }

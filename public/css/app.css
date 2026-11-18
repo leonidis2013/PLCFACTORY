@@ -138,6 +138,11 @@ body:not([data-kind=lesson]):not([data-kind=challenge]) [data-t=mission],body:no
 .chip::before{content:"";position:absolute;left:6px;top:50%;width:4px;height:4px;margin-top:-2px;border-radius:50%;background:var(--dim)}
 .chip:hover{border-color:var(--accent-line)}
 .chip i{font-style:normal;color:var(--dim);margin-left:6px;font:500 10.5px var(--sans)}
+.chipgrp{margin:6px 0 10px}
+.chiph{font:600 11px var(--sans);color:var(--dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px}
+.fbgrp{display:inline-flex;flex-wrap:wrap;gap:4px;padding:3px;border:1px dashed var(--line-2);border-radius:var(--r-s);margin:0 6px 6px 0}
+.chip.draft{border-style:dashed;opacity:.85}
+.chip.MEM::before{background:var(--blue)} .chip.FB::before,.chip.FBM::before{background:#8b5cf6} .chip.FBM.in{opacity:.75}
 .chip.DI::before,.chip.AI::before{background:var(--green)} .chip.DO::before,.chip.AO::before{background:var(--amber)} .chip.SYS::before{background:var(--accent)}
 
 /* ---------- plant panel ---------- */
