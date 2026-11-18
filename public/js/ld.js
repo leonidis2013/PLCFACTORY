@@ -95,6 +95,7 @@ const LDE = (() => {
               <span class="wseg fill"></span>${ed ? `<button class="add" data-a="addc" data-row="${j}" title="Add contact">＋</button>${(rg.rows.length > 1) ? `<button class="add" data-a="delrow" data-row="${j}" title="Remove branch">−</button>` : ''}` : ''}</div>`).join('') || '<div class="lrow"><span class="wseg fill"></span></div>'}
             ${ed ? `<button class="addb" data-a="addrow">＋ branch</button>` : ''}
           </div>
+          ${((rg.post || []).length || (ed && (rg.rows || []).length > 1)) ? `<div class="rpost lrow">${(rg.post || []).map((el, i) => '<span class="wseg"></span>' + elHtml(el, r, 'p', i, 'in')).join('')}${ed ? `<button class="add" data-a="addpost" title="Add a contact in series after the branches">＋</button>` : ''}</div>` : ''}
           <span class="wseg mid"></span>
           <div class="rout${(rg.outs || []).length > 1 ? ' par' : ''}">
             ${(rg.outs || []).map((el, i) => `<div class="lrow o">${elHtml(el, r, 'o', i, 'out')}<span class="wseg fill"></span></div>`).join('')}
@@ -112,6 +113,7 @@ const LDE = (() => {
     const [r, row, i] = id.split(':');
     const rg = pou.rungs[+r];
     if (!rg) return null;
+    if (row === 'p') return { list: rg.post || (rg.post = []), i: +i, kind: 'in', rg, post: true };
     return row === 'o' ? { list: rg.outs, i: +i, kind: 'out', rg } : { list: rg.rows[+row], i: +i, kind: 'in', rg, row: +row };
   }
   function propsHtml(r) {
@@ -160,6 +162,7 @@ const LDE = (() => {
       else if (a === 'del') { if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.textContent = 'Delete?'; return; } pou.rungs.splice(r, 1); sel = null; }
       else if (a === 'addc') { const row = +b.dataset.row; rg.rows[row].push({ t: 'NO', a: '' }); sel = `${r}:${row}:${rg.rows[row].length - 1}`; }
       else if (a === 'delrow') { rg.rows.splice(+b.dataset.row, 1); sel = null; }
+      else if (a === 'addpost') { (rg.post = rg.post || []).push({ t: 'NO', a: '' }); sel = `${r}:p:${rg.post.length - 1}`; }
       else if (a === 'addrow') { rg.rows.push([{ t: 'NO', a: '' }]); sel = `${r}:${rg.rows.length - 1}:0`; }
       else if (a === 'addout') { rg.outs.push({ t: 'COIL', a: '' }); sel = `${r}:o:${rg.outs.length - 1}`; }
       changed();
@@ -196,7 +199,7 @@ const LDE = (() => {
         if (p === 'close') sel = null;
         else if (p === 'del') {
           g.list.splice(g.i, 1);
-          if (g.kind === 'in' && !g.list.length && g.rg.rows.length > 1) g.rg.rows.splice(g.row, 1);
+          if (g.kind === 'in' && !g.post && !g.list.length && g.rg.rows.length > 1) g.rg.rows.splice(g.row, 1);
           sel = null;
         } else {
           const j = g.i + (p === 'left' ? -1 : 1);
@@ -231,6 +234,20 @@ const LDE = (() => {
         rowEl.classList.toggle('pw', pw && row.length > 0);
         if (pw && row.length) rungPw = true;
       });
+      // series contacts after the branches
+      const post = rg.post || [];
+      if (post.length) {
+        let pw = rungPw;
+        rEl.querySelectorAll('.rpost .el').forEach((e, i) => {
+          const el = post[i]; if (!el) return;
+          const st = contactState(el);
+          e.classList.toggle('on', st === true); e.classList.toggle('pw', pw && st === true);
+          const lv = e.querySelector('.lv'); if (lv) { const v = value(el.a); lv.textContent = v === undefined ? '' : typeof v === 'boolean' ? (v ? '1' : '0') : (+v).toFixed(Number.isInteger(+v) ? 0 : 2); }
+          pw = pw && st === true && el.t !== 'P' && el.t !== 'N';
+        });
+        rEl.querySelector('.rpost').classList.toggle('pw', rungPw);
+        rungPw = pw;
+      }
       // outputs: coils show their own tag state, boxes show rung power
       rEl.querySelectorAll('.rout .el').forEach((e, i) => {
         const el = (rg.outs || [])[i]; if (!el) return;

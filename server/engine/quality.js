@@ -108,7 +108,7 @@ function measure(units) {
     if (p.lang === 'LD') {
       for (const r of p.rungs || []) {
         rungs++;
-        const els = [].concat(...(r.rows || []), r.outs || []);
+        const els = [].concat(...(r.rows || []), r.post || [], r.outs || []);
         elements += els.length;
         for (const e of els) {
           size += e.t === 'ST' ? Math.max(2, Math.ceil((String(e.a).match(TOKEN) || []).length / 3)) : 1;

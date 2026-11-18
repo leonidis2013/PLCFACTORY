@@ -399,6 +399,7 @@ function canonUnits(b) {           // mirrors server/engine/runtime.js canonUnit
     if (o.lang === 'LD') o.rungs = (Array.isArray(p.rungs) ? p.rungs : []).slice(0, 500).map(r => ({
       comment: str(r.comment, 300),
       rows: (Array.isArray(r.rows) ? r.rows : []).slice(0, 12).map(row => (Array.isArray(row) ? row : []).slice(0, 16).map(el => ({ t: str(el.t, 8), a: str(el.a, 120), b: str(el.b, 120), op: str(el.op, 3) }))),
+      ...(Array.isArray(r.post) && r.post.length ? { post: r.post.slice(0, 16).map(el => ({ t: str(el.t, 8), a: str(el.a, 120), b: str(el.b, 120), op: str(el.op, 3) })) } : {}),
       outs: (Array.isArray(r.outs) ? r.outs : []).slice(0, 12).map(el => ({ t: str(el.t, 8), a: str(el.a, 200), b: str(el.b, 120), c: str(el.c, 120) })),
     }));
     else o.src = str(p.src, 400000);

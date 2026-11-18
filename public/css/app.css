@@ -429,6 +429,9 @@ input.rc:hover,input.rc:focus{border-bottom-color:var(--line-2);outline:0}
 .lrow{display:flex;align-items:center;min-height:62px;gap:0}
 .wseg{display:inline-block;height:2px;width:14px;background:var(--wire);flex:none}
 .wseg.fill{flex:1;min-width:14px}
+.rpost{align-self:flex-start;flex:none;min-height:62px}
+.rpost>.wseg{width:14px}
+.ld.online .rpost.pw>.wseg:first-child{background:var(--green)}
 .wseg.mid{align-self:flex-start;margin-top:30px;flex:1;min-width:20px}
 .ld.online .lrow.pw>.wseg{background:var(--green)}
 .ld.online .rung.pw>.rbody>.wseg.mid,.ld.online .rung.pw .rout .wseg{background:var(--green)}

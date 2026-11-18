@@ -644,7 +644,7 @@ const LD_THEORY = {
  |--+--] [--+--------] [-----------------------( )--|
  |  |  Run  |
  |  +--] [--+`)}
-    <p>In this editor a branch is a whole row, so you draw it as two rows that each end in the Stop contact: <code>I_Start · I_Stop</code> OR <code>Run · I_Stop</code>. Stop is in series on every path, so <b>Stop always wins</b>. (A latch <code>(S)</code> on Start with an unlatch <code>(R)</code> from Stop also works — but a seal-in drops out by itself on a power loss, which is why it is the standard.)</p>
+    <p>In the editor: put <code>I_Start</code> on the first row, add a <b>branch</b> with <code>Run</code>, then use the <b>＋</b> to the right of the branches to add <code>I_Stop</code> in series after them. Stop is in series with every path, so <b>Stop always wins</b>. (A latch <code>(S)</code> on Start with an unlatch <code>(R)</code> from Stop also works — but a seal-in drops out by itself on a power loss, which is why it is the standard.)</p>
     <p>The output turns on the contactor, but that doesn't prove the motor runs. An overload relay can trip. Use the starter's <b>auxiliary contact</b> (running feedback) for status lights.</p>`,
   L16: null,   // filled from the ST text below with a ladder rung
   L04: `<p>A reversing starter swaps two phases with a second contactor. If <b>FWD and REV</b> close together, the result is a phase-to-phase short. Real panels use a mechanical interlock, auxiliary-contact interlocks <i>and</i> PLC interlocks.</p>

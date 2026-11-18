@@ -2,8 +2,9 @@
 /*
  * Ladder Diagram → Structured Text.
  *
- * A rung is { comment, rows: [[input…], …], outs: [output…] }:
- *   rows are parallel branches (OR), each row is contacts in series (AND).
+ * A rung is { comment, rows: [[input…], …], post: [input…], outs: [output…] }:
+ *   rows are parallel branches (OR), each row is contacts in series (AND);
+ *   post (optional) are contacts in series after the branches, e.g. (Start OR Run) AND Stop.
  *   Every output is driven by the rung result (outputs in parallel).
  *
  * Inputs:  NO a · NC a · P a (rising edge) · N a (falling edge) · CMP a op b
@@ -38,7 +39,7 @@ function toST(pou, uidx) {
     const out = [];
     const pre = [];
     const rows = (rung.rows || []).filter(row => row && row.length);
-    const terms = rows.map(row => row.map(el => {
+    const contact = el => {
       if (!INPUTS.includes(el.t)) throw new LdError(r, `'${el.t}' can't be used as an input contact`);
       if (el.t === 'NO') return operand(el.a, r, 'Contact tag');
       if (el.t === 'NC') return `NOT ${operand(el.a, r, 'Contact tag')}`;
@@ -50,8 +51,11 @@ function toST(pou, uidx) {
       }
       if (!CMP_OPS.includes(el.op)) throw new LdError(r, `Unknown compare '${el.op}'`);
       return `(${operand(el.a, r, 'Compare A')} ${el.op} ${operand(el.b, r, 'Compare B')})`;
-    }).map(x => `(${x})`).join(' AND '));
-    const cond = terms.length ? terms.map(t => `(${t})`).join(' OR ') : 'TRUE';
+    };
+    const terms = rows.map(row => row.map(contact).map(x => `(${x})`).join(' AND '));
+    const post = (rung.post || []).map(contact).map(x => `(${x})`);
+    let cond = terms.length ? terms.map(t => `(${t})`).join(' OR ') : 'TRUE';
+    if (post.length) cond = `(${cond}) AND ${post.join(' AND ')}`;
     pre.forEach(s => out.push(s));
     out.push(`${P}R := ${cond};`);
     for (const o of rung.outs || []) {
