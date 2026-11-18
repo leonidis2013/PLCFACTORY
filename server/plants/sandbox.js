@@ -45,6 +45,9 @@ const TYPES = {
   selector: { label: 'Selector switch', cat: 'Operator panel', icon: 'selector',
     props: { positions: { t: 'sel', opts: [['2', '2-position'], ['3', '3-position']], def: '2', label: 'Positions' }, labels: { t: 'text', def: 'OFF,ON', label: 'Position labels' } } },
   estop: { label: 'E-stop', cat: 'Operator panel', icon: 'estop', props: {} },
+  safetyrelay: { label: 'Safety relay', cat: 'Safety', icon: 'sr',
+    props: { estop: { t: 'ref', of: ['estop', ''], def: '', label: 'E-stop (dual channel)' }, reset: { t: 'ref', of: ['pushbutton', ''], def: '', label: 'Reset button' },
+      mode: { t: 'sel', opts: [['manual', 'Monitored manual reset'], ['auto', 'Automatic reset (not for E-stops)']], def: 'manual', label: 'Reset mode' } } },
   pot: { label: 'Potentiometer', cat: 'Operator panel', icon: 'pot',
     props: { min: { t: 'num', def: 0, label: 'Min' }, max: { t: 'num', def: 100, label: 'Max' }, unit: { t: 'text', def: '%', label: 'Unit' } } },
   pilot: { label: 'Pilot light', cat: 'Operator panel', icon: 'pilot', props: { color: { t: 'sel', opts: COLORS.map(c => [c, c]), def: 'green', label: 'Colour' } } },
@@ -173,6 +176,11 @@ function makeSandbox(rawLayout) {
         break;
       }
       case 'estop': S(c, 'tripped', 'tripped (latched)', 'bool', { panel: true }); break;
+      case 'safetyrelay':
+        S(c, 'ok', 'safety outputs ON (status contact)', 'bool'); S(c, 'fault', 'channel discrepancy / fault', 'bool');
+        S(c, 'ch1', 'E-stop channel 1 closed', 'bool'); S(c, 'ch2', 'E-stop channel 2 closed', 'bool');
+        faults.push([`${c.id}.weld`, `${c.name}: E-stop channel 2 shorted (cross-fault)`]);
+        break;
       case 'pot': S(c, 'value', 'value', 'analog', { unit: p.unit, min: +p.min, max: +p.max, dec: 2, panel: true }); break;
       case 'pilot': o.on = A(c, '', 'BOOL', 'DO', `${c.name} pilot light (${p.color})`); break;
       case 'stacklight':
@@ -198,6 +206,7 @@ function makeSandbox(rawLayout) {
       if (c.type === 'pushbutton') st.on = false;
       if (c.type === 'selector') st.pos = 0;
       if (c.type === 'estop') st.tripped = false;
+      if (c.type === 'safetyrelay') Object.assign(st, { ok: false, fault: false, ch1: true, ch2: true, prevR: false });
       if (c.type === 'pot') st.value = +p.min;
     }
     return s;
@@ -222,6 +231,7 @@ function makeSandbox(rawLayout) {
       case 'selector': return k === 'pos' ? st.pos : st.pos === +k.slice(1);
       case 'estop': return st.tripped;
       case 'pot': return st.value;
+      case 'safetyrelay': return { ok: st.ok, fault: st.fault, ch1: st.ch1, ch2: st.ch2 }[k];
     }
     return 0;
   }
@@ -255,7 +265,32 @@ function makeSandbox(rawLayout) {
   }
 
   // ---------------- physics ----------------
+  /* Safety relays: dual-channel E-stop monitoring with cross-fault detection and monitored manual reset (on release).
+     While any safety relay is off, power to every actuator is removed in hardware — the PLC cannot override it.
+     Indication (pilot lights, stack lights) runs on the control circuit and stays powered. */
+  const POWERED = new Set(['valve', 'cvalve', 'pump', 'heater', 'motor', 'conveyor', 'cylinder']);
+  function safety(s) {
+    let cut = false;
+    for (const c of comps) {
+      if (c.type !== 'safetyrelay') continue;
+      const st = s.c[c.id], p = c.props, es = byId[p.estop], rb = byId[p.reset];
+      const tripped = es && es.type === 'estop' ? s.c[es.id].tripped : false;
+      st.ch1 = !tripped; st.ch2 = !tripped || !!s.faults[`${c.id}.weld`];
+      if (st.ch1 !== st.ch2) st.fault = true;
+      else if (!st.ch1 && !st.ch2) st.fault = false;         // both channels open together again: discrepancy cleared
+      if (!st.ch1 || !st.ch2 || st.fault) st.ok = false;
+      const r = rb && rb.type === 'pushbutton' ? !!s.c[rb.id].on : false;
+      if (st.ch1 && st.ch2 && !st.fault && (p.mode === 'auto' || (st.prevR && !r))) st.ok = true;
+      st.prevR = r;
+      if (!st.ok) cut = true;
+    }
+    return cut;
+  }
   function step(s, o, dtAll) {
+    if (safety(s)) {
+      o = Object.assign({}, o);
+      for (const c of comps) if (POWERED.has(c.type)) for (const name of Object.values(out[c.id] || {})) o[name] = typeof o[name] === 'boolean' ? false : 0;
+    }
     const n = Math.max(1, Math.ceil(dtAll / 0.05)), dt = dtAll / n;
     for (let i = 0; i < n; i++) sub(s, o, dt);
     const msgs = [];
@@ -266,6 +301,7 @@ function makeSandbox(rawLayout) {
       if (c.type === 'pump' && st.dry > 0) msgs.push(`${c.name} is running dry.`);
       if (c.type === 'heater' && s.faults[`${c.id}.burnt`] && st.burnMsg) msgs.push(`${c.name} burned out (energised without enough liquid).`);
       if (c.type === 'conveyor' && st.items.some(it => it.state === 'jam')) msgs.push(`${c.name}: part jammed at a cylinder — clear it.`);
+      if (c.type === 'safetyrelay' && !st.ok) msgs.push(`${c.name}: safety circuit open — ${st.fault ? 'channel discrepancy: check the E-stop wiring, then press and release the E-stop' : !(st.ch1 && st.ch2) ? 'E-stop pressed' : 'press and release the reset button'}. Power to the machine is off.`);
     }
     s.msgs = msgs;
   }
@@ -428,6 +464,7 @@ function makeSandbox(rawLayout) {
       case 'cylinder': return [S2('discrete', `${c.id}.ext`, { tag: `I_${n}_Ext`, contact: 'NO' }), S2('discrete', `${c.id}.ret`, { tag: `I_${n}_Ret`, contact: 'NO' })];
       case 'pushbutton': return [S2('discrete', `${c.id}.pressed`, { tag: `I_${n}`, contact: 'NO' })];
       case 'estop': return [S2('discrete', `${c.id}.tripped`, { tag: `I_${n}`, contact: 'NC' })];
+      case 'safetyrelay': return [S2('discrete', `${c.id}.ok`, { tag: `I_${n}_OK`, contact: 'NO' }), S2('discrete', `${c.id}.fault`, { tag: `I_${n}_Fault`, contact: 'NO' })];
       case 'selector': return Array.from({ length: +c.props.positions }, (_, i) => S2('discrete', `${c.id}.p${i}`, { tag: `I_${n}_P${i}`, contact: 'NO' })).slice(1);
       case 'pot': return [S2('analog', `${c.id}.value`, { tag: `AI_${n}`, lo: +c.props.min, hi: +c.props.max, scale: 'eng', noise: 0 })];
       case 'conveyor': return [S2('probe', `${c.id}.part`, { tag: `I_${n}_PE_End`, pos: Math.round(c.props.length * 1000 - 150), contact: 'NO' })];

@@ -8,7 +8,7 @@ const SBX = (() => {
   const f1 = (v, d = 1) => (v === undefined || v === null || !isFinite(v) ? '—' : (+v).toFixed(d));
   const COL = { green: '#1f9d5c', red: '#d33a3f', amber: '#e8a317', blue: '#2f62e6', white: '#eef1f4', black: '#2a2e33' };
   const LIT = { green: '#2fd17a', red: '#ff4d4d', amber: '#ffc531', blue: '#5b8cff', white: '#ffffff', black: '#777777' };
-  const PANEL = new Set(['pushbutton', 'selector', 'estop', 'pot', 'pilot', 'stacklight']);
+  const PANEL = new Set(['pushbutton', 'selector', 'estop', 'pot', 'pilot', 'stacklight', 'safetyrelay']);
 
   // ---------- geometry ----------
   const tankGeo = c => { const R = clampN(0.28 * Math.cbrt((+c.props.capacity || 200) / 100), 0.22, 1.3); return { R, H: Math.max(0.6, R * 2.3), y0: 0.35 }; };
@@ -63,6 +63,7 @@ const SBX = (() => {
       estop: '<circle cx="10" cy="10" r="8"/><circle cx="10" cy="10" r="5" fill="currentColor"/>',
       pot: '<circle cx="10" cy="10" r="7"/><line x1="10" y1="10" x2="6" y2="5"/><path d="M4 15 A8 8 0 1 1 16 15" stroke-dasharray="1 2"/>',
       pilot: '<circle cx="10" cy="10" r="6"/><line x1="10" y1="1" x2="10" y2="3"/><line x1="17" y1="10" x2="19" y2="10"/><line x1="1" y1="10" x2="3" y2="10"/>',
+      sr: '<rect x="4" y="2" width="12" height="16" rx="1.5"/><circle cx="8" cy="6" r="1.3" fill="currentColor"/><circle cx="12" cy="6" r="1.3"/><line x1="7" y1="11" x2="13" y2="11"/><line x1="7" y1="14" x2="13" y2="14"/>',
       stack: '<rect x="7" y="2" width="6" height="4" rx="1"/><rect x="7" y="7" width="6" height="4" rx="1"/><rect x="7" y="12" width="6" height="4" rx="1"/><line x1="10" y1="16" x2="10" y2="19"/>',
     }[type] || '<rect x="4" y="4" width="12" height="12"/>';
     return `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${g}</svg>`;
@@ -74,7 +75,8 @@ const SBX = (() => {
    */
   function plan(L, v, ctx, opts = {}) {
     const S = 100, b = bounds(L), pad = 0.6;
-    const vb = [(b.x0 - pad) * S, (b.y0 - pad) * S, Math.max(4, b.x1 - b.x0 + pad * 2) * S, Math.max(2.6, b.y1 - b.y0 + pad * 2) * S];
+    const W0 = Math.max(6, b.x1 - b.x0 + pad * 2), H0 = Math.max(3.6, b.y1 - b.y0 + pad * 2);
+    const vb = [((b.x0 + b.x1) / 2 - W0 / 2) * S, ((b.y0 + b.y1) / 2 - H0 / 2) * S, W0 * S, H0 * S];
     const st = id => (v && v.c && v.c[id]) || {};
     const out = (ctx && ctx.out) || {};
     const ph = ((ctx && ctx.t) || 0) * 30 % 13;
@@ -168,6 +170,15 @@ const SBX = (() => {
           const n = +p.positions, pos = v ? s.pos : 0, ang = n === 2 ? (pos ? 45 : -45) : (pos - 1) * 45;
           g = `<circle r="13" class="ln"/><rect x="-3" y="-11" width="6" height="22" rx="2" transform="rotate(${ang})" style="fill:var(--pl-text)"/>`; box = [-17, -17, 34, 34];
           sub = v ? (p.labels.split(',')[pos] || pos) : `${n}-pos`;
+          break;
+        }
+        case 'safetyrelay': {
+          const ok = v ? s.ok : false, ft = v ? s.fault : false;
+          g = `<rect x="-14" y="-22" width="28" height="44" rx="3" style="fill:#f2c230;stroke:#0005"/><rect x="-10" y="-16" width="20" height="10" rx="1.5" style="fill:#2a2e33"/>` +
+            `<circle cx="-5" cy="-11" r="3" style="fill:${ok ? '#2fd17a' : '#2fd17a33'}"/><circle cx="5" cy="-11" r="3" style="fill:${ft ? '#ff4d4d' : '#ff4d4d33'}"/>` +
+            `<text y="10" text-anchor="middle" style="font:700 8px var(--sans);fill:#2a2e33">SAFETY</text>`;
+          sub = v ? (ok ? 'OK — power on' : ft ? 'FAULT' : 'OFF — reset') : (p.mode === 'auto' ? 'auto reset' : 'manual reset'); box = [-18, -26, 36, 52];
+          if (v && m[p.estop]) { const e = anchor(L, m[p.estop]); g += `<path d="M0 -22 L${(e.x - a.x) * S} ${(e.y - a.y) * S + 15}" style="stroke:#f2c230;stroke-width:1.5;stroke-dasharray:4 3;fill:none"/>`; }
           break;
         }
         case 'estop': g = `<circle r="15" style="fill:#f2c230"/><circle r="10" style="fill:${v && s.tripped ? '#8f1d18' : '#d2312b'}"/>`; sub = v && s.tripped ? 'TRIPPED' : ''; box = [-18, -18, 36, 36]; break;
@@ -333,11 +344,12 @@ const SBX = (() => {
           if (c.type === 'estop') { objs.push(box([x, 1.065, z], [0.2, 0.01, 0.16], '#f2c230')); objs.push(cyl([x, 1.09 - (s.tripped ? 0.02 : 0), z], 0.06, 0.05, '#d2312b')); }
           if (c.type === 'selector') { objs.push(cyl([x, 1.08, z], 0.05, 0.03, '#2a2e33')); objs.push(box([x, 1.1, z], [0.02, 0.02, 0.09], '#eee', { r: [0, ((+p.positions === 2 ? (s.pos ? 45 : -45) : (s.pos - 1) * 45)) * PI / 180, 0] })); }
           if (c.type === 'pot') { objs.push(cyl([x, 1.09, z], 0.045, 0.05, '#2a2e33')); }
+          if (c.type === 'safetyrelay') { objs.push(box([x, 1.15, z], [0.1, 0.2, 0.14], '#f2c230')); objs.push(sph([x - 0.03, 1.21, z + 0.071], 0.012, s.ok ? '#2fd17a' : '#2a4a35', { e: s.ok ? 1 : 0 })); objs.push(sph([x + 0.03, 1.21, z + 0.071], 0.012, s.fault ? '#ff4d4d' : '#4a2a2a', { e: s.fault ? 1 : 0 })); }
           if (c.type === 'stacklight') {
             objs.push(cyl([x, 1.15, z], 0.015, 0.2, DARK));
             [['Green', 1.27], ['Amber', 1.35], ['Red', 1.43]].forEach(([k, yy]) => { const on = !!out[`Q_${c.name}_${k}`], col = { Green: '#2fd17a', Amber: '#ffc531', Red: '#ff4d4d' }[k]; objs.push(cyl([x, yy, z], 0.045, 0.075, col, { a: on ? 1 : 0.35, e: on ? 0.9 : 0 })); });
           }
-          lab([x, c.type === 'stacklight' ? 1.6 : 1.3, z], c.name + (c.type === 'pot' ? ` ${f1(s.value, 1)} ${p.unit}` : c.type === 'selector' ? ` ${(p.labels.split(',')[s.pos] || s.pos)}` : ''), 'dim');
+          lab([x, c.type === 'stacklight' ? 1.6 : 1.3, z], c.name + (c.type === 'safetyrelay' ? (s.ok ? ' OK' : s.fault ? ' FAULT' : ' OFF') : '') + (c.type === 'pot' ? ` ${f1(s.value, 1)} ${p.unit}` : c.type === 'selector' ? ` ${(p.labels.split(',')[s.pos] || s.pos)}` : ''), 'dim');
       }
     }
     return { objs, labels };
@@ -360,6 +372,7 @@ const SBX = (() => {
         if (c.type === 'estop') return `<div class="odev">${nm}<div class="oestop" data-es="${c.id}" title="Click to trip, click again to reset"><i></i></div></div>`;
         if (c.type === 'pot') return `<div class="odev opot">${nm}<input type="range" min="${p.min}" max="${p.max}" step="${(Math.abs(p.max - p.min) / 200) || 0.01}" data-pot="${c.id}"><span class="oval" data-potv="${c.id}"></span></div>`;
         if (c.type === 'pilot') return `<div class="odev">${nm}<div class="olamp c-${p.color}" data-lamp="Q_${escS(c.name)}"></div></div>`;
+        if (c.type === 'safetyrelay') return `<div class="odev" title="Safety relay — wired to the E-stop and reset button, not to the PLC">${nm}<div class="ostack" style="flex-direction:row;gap:6px"><i class="g" data-srok="${c.id}" style="width:13px;height:13px;border-radius:50%"></i><i class="r" data-srf="${c.id}" style="width:13px;height:13px;border-radius:50%"></i></div><span class="oval" data-srt="${c.id}"></span></div>`;
         if (c.type === 'stacklight') return `<div class="odev">${nm}<div class="ostack"><i class="r" data-lamp="Q_${escS(c.name)}_Red"></i><i class="a" data-lamp="Q_${escS(c.name)}_Amber"></i><i class="g" data-lamp="Q_${escS(c.name)}_Green"></i><span class="h" data-lamp="Q_${escS(c.name)}_Horn">HORN</span></div></div>`;
         return '';
       }).join('') : '';
@@ -379,6 +392,7 @@ const SBX = (() => {
       if (c.type === 'pushbutton' && c.props.latch) { const b = el.querySelector(`[data-pb="${c.id}"]`); if (b) b.classList.toggle('lit', !!s.on); }
       if (c.type === 'selector') el.querySelectorAll(`[data-sel="${c.id}"]`).forEach(b => b.classList.toggle('on', +b.dataset.pos === s.pos));
       if (c.type === 'estop') { const b = el.querySelector(`[data-es="${c.id}"]`); if (b) b.classList.toggle('down', !!s.tripped); }
+      if (c.type === 'safetyrelay') { const a = el.querySelector(`[data-srok="${c.id}"]`), b = el.querySelector(`[data-srf="${c.id}"]`), t = el.querySelector(`[data-srt="${c.id}"]`); if (a) a.classList.toggle('on', !!s.ok); if (b) b.classList.toggle('on', !!s.fault); if (t) t.textContent = s.ok ? 'OK' : s.fault ? 'FAULT' : 'OFF'; }
       if (c.type === 'pot') { const b = el.querySelector(`[data-pot="${c.id}"]`), t = el.querySelector(`[data-potv="${c.id}"]`); if (b && document.activeElement !== b) b.value = s.value; if (t) t.textContent = `${f1(s.value, 1)} ${c.props.unit}`; }
     }
     el.querySelectorAll('[data-lamp]').forEach(l => l.classList.toggle('on', !!(ctx.out || {})[l.dataset.lamp]));
@@ -389,7 +403,7 @@ const SBX = (() => {
     let B = null;
     const uid = t => t.slice(0, 3) + Math.random().toString(36).slice(2, 6);
     function nextName(type) {
-      const base = { tank: 'T', valve: 'XV', cvalve: 'FCV', pump: 'P', heater: 'H', motor: 'M', conveyor: 'C', cylinder: 'Cyl', pushbutton: 'PB', selector: 'SS', estop: 'ES', pot: 'Pot', pilot: 'PL', stacklight: 'SL' }[type] || 'X';
+      const base = { safetyrelay: 'SR', tank: 'T', valve: 'XV', cvalve: 'FCV', pump: 'P', heater: 'H', motor: 'M', conveyor: 'C', cylinder: 'Cyl', pushbutton: 'PB', selector: 'SS', estop: 'ES', pot: 'Pot', pilot: 'PL', stacklight: 'SL' }[type] || 'X';
       let n = 1; while (B.draft.components.some(c => c.name.toUpperCase() === (base + n).toUpperCase())) n++;
       return base + n;
     }

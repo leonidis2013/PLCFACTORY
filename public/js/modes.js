@@ -30,10 +30,10 @@ const MODES = (() => {
     let sec = '';
     if (homeMode === 'learn') {
       const units = [...new Set(L.map(x => x.unit))];
-      sec = `<div class="hsec"><div class="row between"><div><h2>Guided learning path</h2><p class="sub">Fifteen lessons that follow a typical industrial PLC certification syllabus. Each has its own machine, a task, hints, and an automatic grader that tests your program against the real simulation.</p></div>
+      sec = `<div class="hsec"><div class="row between"><div><h2>Guided learning path</h2><p class="sub">Sixteen lessons that follow a typical industrial PLC certification syllabus. Each has its own machine, a task, hints, and an automatic grader that tests your program against the real simulation.</p></div>
           <span class="row"><span class="small muted">New lessons in</span>${langSeg(W.lang, 'hLang')}<button class="primary" data-ws="${next.ws}">${done ? 'Continue' : 'Start'}: ${esc(next.title)}</button></span></div>` +
         units.map(u => `<div class="unit-h">${esc(u)}</div><div class="mlist">` + L.filter(x => x.unit === u).map(x => `<button class="mitem${x.done ? ' done' : ''}${W.current === x.ws ? ' cur' : ''}" data-ws="${x.ws}">
-          <span class="num"><span>${+x.id.slice(1)}</span></span><span class="tx"><b>${esc(x.title)}</b><small>${esc(x.summary)}</small>
+          <span class="num"><span>${L.indexOf(x) + 1}</span></span><span class="tx"><b>${esc(x.title)}</b><small>${esc(x.summary)}</small>
           <span class="meta"><span class="chipk">${x.minutes} min</span>${x.done ? '<span class="chipk sandbox">passed</span>' : x.best ? `<span class="chipk">${x.best}/${x.objectives} objectives</span>` : x.started ? '<span class="chipk">started</span>' : ''}</span></span></button>`).join('') + '</div>').join('') + '</div>';
     } else if (homeMode === 'chal') {
       sec = `<div class="hsec"><h2>Troubleshooting</h2><p class="sub">A working plant with something wrong — a failed sensor, a stuck valve, a bad setting or a programming error. Read the work order, investigate with trends, tags and the I/O view, repair it, then close the work order with the root cause. Faster, cleaner fixes score higher; replacing healthy parts costs points.</p>

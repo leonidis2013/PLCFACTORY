@@ -33,8 +33,9 @@ const LESSONS = [
   {
     id: 'L02', unit: 'Discrete logic', title: 'NC contacts and fail-safe wiring', minutes: 8,
     summary: 'Use a normally-closed stop button the safe way.',
-    theory: `<p>Stop buttons and E-stops are wired <b>normally closed (NC)</b>. With nothing pressed, current flows and the input is <b>TRUE</b>. Pressing the button <i>opens</i> the circuit, and so does a broken wire, a loose terminal or a blown fuse. Either way the input goes <b>FALSE</b>.</p>
-      <p>That's why stop logic is written as "allowed to run while the stop input is TRUE". A broken wire then stops the machine instead of silently disabling the stop button.</p>`,
+    theory: `<p>Stop buttons are wired <b>normally closed (NC)</b>. With nothing pressed, current flows and the input is <b>TRUE</b>. Pressing the button <i>opens</i> the circuit, and so does a broken wire, a loose terminal or a blown fuse. Either way the input goes <b>FALSE</b>.</p>
+      <p>That's why stop logic is written as "allowed to run while the stop input is TRUE". A broken wire then stops the machine instead of silently disabling the stop button.</p>
+      <p><b>E-stops</b> are NC too, but an emergency stop is a <i>safety function</i>: it must work even if the PLC has crashed or been programmed wrong. So an E-stop is not just another PLC input — it is wired through a <b>safety relay</b> that removes power directly. That gets its own lesson after the seal-in.</p>`,
     task: `Light <b>Ready</b> while the stop circuit is healthy. It must go out when <b>Stop</b> is pressed <i>and</i> when the Stop wire breaks.` +
       IO_NOTE([['I_Stop', 'Stop button, NC contact: TRUE = healthy, not pressed'], ['Q_Ready', 'Ready pilot light']]),
     layout: { components: [C('pb', 'pushbutton', 'Stop', -0.6, 0, { color: 'red' }), C('pl', 'pilot', 'Ready', 0.6, 0, { color: 'white' })] },
@@ -76,6 +77,50 @@ const LESSONS = [
         h.tap('Start').run(2); if (!h.out('Q_RunLamp')) return 'RunLamp is off while M1 runs';
         h.fault('m1.jam'); h.run(5); if (!h.sig('m1.ol')) return 'Test setup: overload did not trip';
         return fail(h.out('Q_RunLamp') === false, 'RunLamp stayed on although the overload tripped (use the aux contact)'); } },
+    ],
+  },
+  {
+    id: 'L16', unit: 'Discrete logic', title: 'E-stop and the safety relay', minutes: 15,
+    summary: 'Work alongside a hardwired, monitored E-stop circuit — and never restart on your own.',
+    theory: `<p>A standard PLC is not a safety device: a program bug, a forced output or a crashed CPU could keep a motor running. So the <b>emergency stop</b> (ISO 13850, IEC 60204-1) is built as a separate, <b>monitored</b> circuit, rated by ISO 13849-1:</p>
+      <ul><li>The E-stop has <b>two NC contacts</b> wired to two channels of a <b>safety relay</b>. The relay checks that both channels open and close together. A short across one channel (a <i>cross-fault</i>) or a welded contact shows up as a <b>discrepancy</b>, and the relay refuses to switch on again until it is fixed.</li>
+      <li>The safety relay's output contacts sit in series with the contactor coils, so pressing the E-stop removes power <b>directly</b> — whatever the PLC is doing.</li>
+      <li>After the E-stop is released, power stays off until someone presses the blue <b>reset</b> button. The reset is <b>monitored</b>: it acts when the button is <i>released</i>, so a jammed or taped-down button can't reset the circuit.</li></ul>
+      <p>The PLC only reads a <b>status contact</b> from the safety relay (<code>I_SR1_OK</code>), plus a fault output. Its job is the standard control around the safety function:</p>
+      <ul><li>Drop the run latches when the safety circuit opens. Otherwise the motor would jump back into life the moment someone resets — an <b>unexpected restart</b>, which the standards forbid. Restart must always need a new, deliberate Start.</li>
+      <li>Tell the operator what to do: a reset-required lamp, and a fault lamp for wiring problems.</li></ul>
+      <pre>Run := (I_Start OR Run) AND I_Stop AND I_SR1_OK;</pre>`,
+    task: `Run <b>M1</b> with <b>Start</b>/<b>Stop</b> as in the seal-in lesson, but only while the safety relay <b>SR1</b> is OK. When the E-stop <b>ES1</b> is pressed the relay cuts power on its own — your run latch must drop too, so that after the E-stop is released and <b>Reset</b> is pressed, M1 stays off until <b>Start</b> is pressed again. Light <b>ResetLamp</b> while the relay is off and waiting for a reset, and <b>FaultLamp</b> while the relay reports a fault.` +
+      IO_NOTE([['I_Start / I_Stop', 'Start (NO), Stop (NC)'], ['I_SR1_OK', 'Safety relay status contact: TRUE = safety outputs on'], ['I_SR1_Fault', 'Safety relay fault (channel discrepancy)'], ['I_M1_Running', 'M1 aux contact'], ['Q_M1_Run', 'M1 contactor (powered through the safety relay)'], ['Q_ResetLamp / Q_FaultLamp', 'Blue reset-required lamp, red fault lamp']]) +
+      `<p class="small muted">The E-stop and the Reset button are wired to the safety relay, not to the PLC. The relay starts switched off, so press Reset once after power-up.</p>`,
+    layout: { components: [C('st', 'pushbutton', 'Start', -1.8, -1.2, { color: 'green' }), C('sp', 'pushbutton', 'Stop', -1.2, -1.2, { color: 'red' }),
+      C('es', 'estop', 'ES1', -0.5, -1.2), C('rs', 'pushbutton', 'Reset', 0.15, -1.2, { color: 'blue' }),
+      C('rl', 'pilot', 'ResetLamp', 0.8, -1.2, { color: 'blue' }), C('fl', 'pilot', 'FaultLamp', 1.4, -1.2, { color: 'red' }),
+      C('sr', 'safetyrelay', 'SR1', -0.5, 0.2, { estop: 'es', reset: 'rs', mode: 'manual' }), C('m1', 'motor', 'M1', 1, 0.6, { amps: 12 })] },
+    sensors: [DI('I_Start', 'st.pressed'), DI('I_Stop', 'sp.pressed', 'NC'), DI('I_SR1_OK', 'sr.ok', 'NO', 'Safety relay SR1 status'), DI('I_SR1_Fault', 'sr.fault', 'NO', 'Safety relay SR1 fault'), DI('I_M1_Running', 'm1.running')],
+    starter: ST('(* E-stop lesson — standard control around a safety relay *)\nVAR\n  Run : BOOL;\nEND_VAR\n\n'),
+    solution: ST('VAR\n  Run : BOOL;\nEND_VAR\n(* the run latch drops whenever the safety circuit opens: no restart without a new Start *)\nRun := (I_Start OR Run) AND I_Stop AND I_SR1_OK;\nQ_M1_Run := Run;\nQ_ResetLamp := NOT I_SR1_OK AND NOT I_SR1_Fault;\nQ_FaultLamp := I_SR1_Fault;\n'),
+    hints: ['Start from the seal-in: Run := (I_Start OR Run) AND I_Stop; — then add the safety relay status in series.', 'Run := (I_Start OR Run) AND I_Stop AND I_SR1_OK;  ResetLamp := NOT I_SR1_OK AND NOT I_SR1_Fault;'],
+    objectives: [
+      { id: 'power', text: 'After power-up: ResetLamp on; after Reset, Start runs M1', test: h => {
+        h.run(0.3); if (!h.out('Q_ResetLamp')) return 'ResetLamp is off although the safety relay needs a reset';
+        h.tap('Reset').run(0.3); if (h.out('Q_ResetLamp')) return 'ResetLamp still on after Reset';
+        h.tap('Start').run(1.5); return fail(h.out('Q_M1_Run') && h.sig('m1.running'), 'M1 did not run after Reset and Start'); } },
+      { id: 'drop', text: 'E-stop stops M1 and drops the run command', test: h => {
+        h.tap('Reset').tap('Start').run(1.5); if (!h.sig('m1.running')) return 'M1 never started';
+        h.estop('ES1', true).run(1); if (h.sig('m1.running')) return 'Test setup: M1 still running';
+        return fail(!h.out('Q_M1_Run'), 'Q_M1_Run stayed TRUE — the run latch did not drop when the safety circuit opened'); } },
+      { id: 'norestart', text: 'No restart after E-stop release + reset — only a new Start runs M1', test: h => {
+        h.tap('Reset').tap('Start').run(1.5); h.estop('ES1', true).run(0.5); h.estop('ES1', false).run(0.3); h.tap('Reset');
+        if (!h.always(() => !h.sig('m1.running'), 3)) return 'M1 restarted by itself after the reset — unexpected restart!';
+        h.tap('Start').run(1.5); return fail(h.sig('m1.running'), 'Start did not restart M1'); } },
+      { id: 'blocked', text: 'Start pressed during the E-stop is ignored', test: h => {
+        h.tap('Reset').run(0.2); h.estop('ES1', true).run(0.3); h.tap('Start'); h.estop('ES1', false).run(0.3); h.tap('Reset');
+        return fail(h.always(() => !h.sig('m1.running'), 3), 'M1 started after reset because of a Start pressed during the E-stop'); } },
+      { id: 'fault', text: 'Cross-fault: FaultLamp on, ResetLamp off', test: h => {
+        h.tap('Reset').run(0.2); h.fault('sr.weld'); h.estop('ES1', true).run(0.5);
+        if (!h.sig('sr.fault')) return 'Test setup: relay did not detect the discrepancy';
+        return fail(h.out('Q_FaultLamp') && !h.out('Q_ResetLamp'), 'Expected FaultLamp on and ResetLamp off during a relay fault'); } },
     ],
   },
   {
@@ -467,6 +512,13 @@ const LADDER = {
     hints: ['Watch I_Stop in the Tags tab. It is TRUE when nobody presses Stop.', 'Use a normally-OPEN contact on I_Stop — the field wiring already inverts it. An NC contact here would be a double negative.'] },
   L03: { starter: LDU('  Run : BOOL;', []), solution: null,
     hints: ['Two branches in parallel: I_Start, and a Run contact (the seal-in). Put I_Stop in series on both branches. Drive coil Run.', 'Then a rung Run → Q_M1_Run, and a rung I_M1_Running → Q_RunLamp.'] },
+  L16: { starter: LDU('  Run : BOOL;', []),
+    solution: LDU('  Run : BOOL;', [
+      R('Seal-in, only while the safety relay is on — the latch drops when it opens', [[NO('I_Start'), NO('I_Stop'), NO('I_SR1_OK')], [NO('Run'), NO('I_Stop'), NO('I_SR1_OK')]], [O('COIL', 'Run')]),
+      R('', [[NO('Run')]], [O('COIL', 'Q_M1_Run')]),
+      R('Reset required', [[NC('I_SR1_OK'), NC('I_SR1_Fault')]], [O('COIL', 'Q_ResetLamp')]),
+      R('Safety relay fault', [[NO('I_SR1_Fault')]], [O('COIL', 'Q_FaultLamp')])]),
+    hints: ['Start from the seal-in rung and add an NO contact on I_SR1_OK in series on both branches.', 'ResetLamp: NC I_SR1_OK and NC I_SR1_Fault in series. FaultLamp: NO I_SR1_Fault.'] },
   L04: { starter: LDU('  Fwd, Rev : BOOL;', []),
     solution: LDU('  Fwd, Rev : BOOL;', [
       R('Forward seal-in, interlocked with reverse', [[NO('I_Fwd'), NO('I_Stop'), NC('Rev')], [NO('Fwd'), NO('I_Stop'), NC('Rev')]], [O('COIL', 'Fwd')]),
