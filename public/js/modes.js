@@ -253,10 +253,23 @@ const MODES = (() => {
   function onProject(wsChanged) {
     document.body.dataset.kind = S.info.kind;
     $('#wsBtn').innerHTML = `<span class="chipk ${S.info.kind}">${{ lesson: 'Lesson', challenge: 'Challenge', sandbox: 'My machine', practice: 'Practice' }[S.info.kind]}</span><span class="nm">${esc(S.info.wsName)}</span>`;
+    if (wsChanged) S.allTabs = false;
+    applyTabs();
     const tab = document.body.dataset.tab;
     if ((tab === 'mission' && !['lesson', 'challenge'].includes(S.info.kind)) || (tab === 'build' && S.info.kind !== 'sandbox')) setTab(defaultTab());
     else if (tab === 'mission' && wsChanged) renderMission();
     if (S.info.kind === 'sandbox' && cat) SBX.Builder.sync({ ws: S.info.ws, layout: S.info.project.layout, sensors: S.info.project.sensors, editable: can('engineer'), cat });
+  }
+  /* Lessons only show the tabs they need; "More" reveals the rest for this visit */
+  function applyTabs() {
+    const want = S.info.tabs, all = !want || S.allTabs;
+    let hid = 0;
+    $$('#tabs button[data-t]').forEach(b => { const h = !all && !want.includes(b.dataset.t); b.classList.toggle('lt-hide', h); if (h && !['build', 'plant', 'mission'].includes(b.dataset.t) && !b.hidden) hid++; });
+    const m = $('#moreTabs');
+    m.hidden = !want; m.textContent = S.allTabs ? 'Fewer ▴' : `More (${hid}) ▾`;
+    m.onclick = () => { S.allTabs = !S.allTabs; applyTabs(); if (!S.allTabs && $(`#tabs [data-t="${document.body.dataset.tab}"]`).classList.contains('lt-hide')) setTab('mission'); };
+    const cur = $(`#tabs [data-t="${document.body.dataset.tab}"]`);
+    if (cur && cur.classList.contains('lt-hide')) setTab('mission');
   }
   return { openHome, closeHome, renderMission, renderBuild, onProject, tick, defaultTab };
 })();

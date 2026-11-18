@@ -178,6 +178,12 @@ class Workspaces {
     };
   }
 
+  /** tabs a lesson needs (the rest are tucked under "More") */
+  lessonTabs(ws) {
+    if (kindOf(ws) !== 'lesson') return null;
+    const x = L[ws.slice(7)];
+    return ['mission', 'program', 'plant', 'tags', 'learn'].concat(x.tabs || []);
+  }
   // ---------- missions ----------
   mission(p, user) {
     const k = kindOf(p.ws);

@@ -250,7 +250,7 @@ IF Edge.Q THEN Lamp := NOT Lamp; END_IF;</pre>
   },
   // ───────────────────────── 3 · Analog & process ─────────────────────────
   {
-    id: 'L09', unit: 'Analog & process', title: 'Analog scaling: 4–20 mA', minutes: 15,
+    id: 'L09', tabs: ['io'], unit: 'Analog & process', title: 'Analog scaling: 4–20 mA', minutes: 15,
     summary: 'Scale a current loop to engineering units and detect a broken wire.',
     theory: `<p>Most transmitters send <b>4–20 mA</b>: 4 mA is 0 % of range, 20 mA is 100 %. The live zero at 4 mA lets you tell "empty" (4 mA) from a <b>broken wire</b> (0 mA). Under NAMUR NE43, below 3.6–3.8 mA means a fault.</p>
       <pre>Level := (mA - 4.0) / 16.0 * 100.0;      (* 0–100 % *)
@@ -273,7 +273,7 @@ TxFault := mA < 3.8;</pre>
     ],
   },
   {
-    id: 'L10', unit: 'Analog & process', title: 'Compare: level control with hysteresis', minutes: 12,
+    id: 'L10', tabs: ['trend'], unit: 'Analog & process', title: 'Compare: level control with hysteresis', minutes: 12,
     summary: 'Keep a tank between two levels without chattering the valve.',
     theory: `<p>Opening a valve at "level &lt; 50" and closing it at "level ≥ 50" makes it cycle on every ripple. That's called <b>chattering</b>, and it wears out valves. Use two thresholds (<b>hysteresis</b>, a deadband): start filling at the low limit and stop at the high limit.</p>
       <pre>IF Level <= 40.0 THEN Filling := TRUE;
@@ -294,7 +294,7 @@ ELSIF Level >= 60.0 THEN Filling := FALSE; END_IF;</pre>`,
     ],
   },
   {
-    id: 'L11', unit: 'Analog & process', title: 'Sequencing: a batch mixer state machine', minutes: 20,
+    id: 'L11', tabs: ['trend'], unit: 'Analog & process', title: 'Sequencing: a batch mixer state machine', minutes: 20,
     summary: 'Fill → mix → drain with a CASE state machine.',
     theory: `<p>Machines run in <b>steps</b>. Keep the step in an integer and use <code>CASE</code>: each step waits for its <b>transition condition</b>, and outputs are written <i>outside</i> the CASE from the step number. That makes the logic easy to read and to troubleshoot (the HMI can show "Step 20").</p>
       <pre>CASE Step OF
@@ -471,7 +471,7 @@ END_FOR;
   },
   // ───────────────────────── 5 · Control ─────────────────────────
   {
-    id: 'L15', unit: 'Closed-loop control', title: 'PID: tank temperature', minutes: 25,
+    id: 'L15', tabs: ['trend'], unit: 'Closed-loop control', title: 'PID: tank temperature', minutes: 25,
     summary: 'Tune a PID loop to hold temperature against a cooling load.',
     theory: `<p>On/off control overshoots and cycles. A <b>PID</b> controller sets a continuous output from the error:</p>
       <ul><li><b>P</b> reacts to the error now.</li><li><b>I</b> removes the steady offset.</li><li><b>D</b> damps fast changes.</li></ul>

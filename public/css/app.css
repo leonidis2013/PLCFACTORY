@@ -97,6 +97,9 @@ nav#tabs button{border:0;border-radius:0;background:transparent;box-shadow:none;
 nav#tabs button:hover{color:var(--text);background:transparent}
 nav#tabs button.on{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
 nav#tabs button[data-t=mission].on,nav#tabs button[data-t=build].on{color:var(--accent)}
+nav#tabs button.lt-hide{display:none}
+nav#tabs button.tab-more{color:var(--dim);font-size:12.5px}
+nav#tabs button.tab-more[hidden]{display:none}
 #forceBanner{background:var(--amber-soft);border-bottom:1px solid color-mix(in srgb,var(--amber) 35%,transparent);color:var(--amber);font:600 12.5px var(--sans);text-align:center;padding:5px}
 #lotoBanner{background:var(--red-soft);border-bottom:1px solid color-mix(in srgb,var(--red) 35%,transparent);color:var(--red);font:600 12.5px var(--sans);text-align:center;padding:5px}
 .rules{margin:6px 0 0;padding-left:18px;font-size:13px}.rules li{margin:3px 0}.rules b.y{color:var(--green)}.rules b.n{color:var(--red)}

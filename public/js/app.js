@@ -1002,7 +1002,7 @@ function frame() {
   connect();
   let tab = MODES.defaultTab(), seen = false;
   try { tab = location.hash.slice(1) || localStorage.getItem('plcf.tab') || tab; seen = !!localStorage.getItem('plcf.seenHome'); } catch (e) {}
-  if (!document.querySelector(`#tabs [data-t="${tab}"]`) || (tab === 'mission' && !['lesson', 'challenge'].includes(S.info.kind)) || (tab === 'build' && S.info.kind !== 'sandbox')) tab = MODES.defaultTab();
+  if (!document.querySelector(`#tabs [data-t="${tab}"]`) || (tab === 'mission' && !['lesson', 'challenge'].includes(S.info.kind)) || (tab === 'build' && S.info.kind !== 'sandbox') || (S.info.tabs && !S.info.tabs.includes(tab))) tab = MODES.defaultTab();
   setTab(tab);
   applyRole();
   if (!seen) MODES.openHome();

@@ -134,7 +134,7 @@ function projectInfo() {
   return {
     version: pkg.version,
     scen: rt.project.scen,
-    ws: rt.project.ws, kind: kindOf(rt.project.ws), wsName: wsTitle(),
+    ws: rt.project.ws, kind: kindOf(rt.project.ws), wsName: wsTitle(), tabs: wsm.lessonTabs(rt.project.ws),
     project: Object.assign({}, rt.project, { challenge: undefined }),
     loaded: rt.loaded,
     types: rt.typeList(),
