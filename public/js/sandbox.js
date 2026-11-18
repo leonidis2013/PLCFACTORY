@@ -392,8 +392,8 @@ const SBX = (() => {
       if (c.type === 'pushbutton' && c.props.latch) { const b = el.querySelector(`[data-pb="${c.id}"]`); if (b) b.classList.toggle('lit', !!s.on); }
       if (c.type === 'selector') el.querySelectorAll(`[data-sel="${c.id}"]`).forEach(b => b.classList.toggle('on', +b.dataset.pos === s.pos));
       if (c.type === 'estop') { const b = el.querySelector(`[data-es="${c.id}"]`); if (b) b.classList.toggle('down', !!s.tripped); }
-      if (c.type === 'safetyrelay') { const a = el.querySelector(`[data-srok="${c.id}"]`), b = el.querySelector(`[data-srf="${c.id}"]`), t = el.querySelector(`[data-srt="${c.id}"]`); if (a) a.classList.toggle('on', !!s.ok); if (b) b.classList.toggle('on', !!s.fault); if (t) t.textContent = s.ok ? 'OK' : s.fault ? 'FAULT' : 'OFF'; }
-      if (c.type === 'pot') { const b = el.querySelector(`[data-pot="${c.id}"]`), t = el.querySelector(`[data-potv="${c.id}"]`); if (b && document.activeElement !== b) b.value = s.value; if (t) t.textContent = `${f1(s.value, 1)} ${c.props.unit}`; }
+      if (c.type === 'safetyrelay') { const a = el.querySelector(`[data-srok="${c.id}"]`), b = el.querySelector(`[data-srf="${c.id}"]`), t = el.querySelector(`[data-srt="${c.id}"]`); if (a) a.classList.toggle('on', !!s.ok); if (b) b.classList.toggle('on', !!s.fault); if (t) { const x = s.ok ? 'OK' : s.fault ? 'FAULT' : 'OFF'; if (t.textContent !== x) t.textContent = x; } }
+      if (c.type === 'pot') { const b = el.querySelector(`[data-pot="${c.id}"]`), t = el.querySelector(`[data-potv="${c.id}"]`); if (b && document.activeElement !== b) b.value = s.value; if (t) { const x = `${f1(s.value, 1)} ${c.props.unit}`; if (t.textContent !== x) t.textContent = x; } }
     }
     el.querySelectorAll('[data-lamp]').forEach(l => l.classList.toggle('on', !!(ctx.out || {})[l.dataset.lamp]));
   }

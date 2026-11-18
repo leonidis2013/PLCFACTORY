@@ -91,10 +91,16 @@ $$('#tabs button').forEach(b => b.onclick = () => setTab(b.dataset.t));
 
 // ---------- header ----------
 $('#runBtn').onclick = async () => {
-  const run = S.snap && S.snap.plc === 'RUN';
-  if (!run && S.editorDirty) toast('Note: your edits are not downloaded yet — the PLC runs the downloaded program.');
-  const r = await api('POST', '/api/mode', { mode: run ? 'STOP' : 'RUN' });
-  if (r && r.ok === false) toast(r.msg, true);
+  const rb = $('#runBtn');
+  if (rb.dataset.busy) return;
+  const mode = rb.dataset.next || 'RUN';          // what the button shows is what it does
+  if (mode === 'RUN' && S.editorDirty) toast('Note: your edits are not downloaded yet — the PLC runs the downloaded program.');
+  rb.dataset.busy = '1';
+  try {
+    const r = await api('POST', '/api/mode', { mode });
+    if (r && r.ok === false) toast(r.msg, true);
+    else if (S.snap) { S.snap.plc = mode; S.hdrKey = null; updateHeader(); }   // show it now; the next snapshot confirms
+  } finally { delete rb.dataset.busy; }
 };
 $('#lotoGo').onclick = e => { e.preventDefault(); setTab('mission'); };
 $('#wsBtn').onclick = () => (document.body.classList.contains('home-open') ? MODES.closeHome() : MODES.openHome());
@@ -115,18 +121,25 @@ function themeChanged() {
 $('#themeBtn').onclick = () => { const n = PLCF_THEME.cycle(); toast(n === 'auto' ? 'Theme follows your system' : `${n[0].toUpperCase() + n.slice(1)} theme`); };
 window.addEventListener('plcf-theme', themeChanged);
 themeChanged();
+function setText(el, v) { if (el && el.textContent !== v) el.textContent = v; }
 function updateHeader() {
   const s = S.snap; if (!s) return;
-  const st = $('#plcStat');
-  st.lastChild.textContent = s.plc;
-  st.className = 'pill ' + s.plc.toLowerCase();
-  st.title = s.fault || '';
-  const rb = $('#runBtn');
-  rb.textContent = s.plc === 'RUN' ? '■ STOP' : '▶ RUN';
-  rb.className = 'mode ' + (s.plc === 'RUN' ? 'stop' : 'run');
-  $('#scanInfo').textContent = s.plc === 'RUN' ? `scan ${s.scanTime.toFixed(2)} ms / ${s.scanMs} ms` : (s.fault || `cycle ${s.scanMs} ms`);
+  // Only touch the DOM when the state changes: rewriting a button's text 20×/s can swallow clicks (Safari)
+  const key = s.plc + '|' + (s.fault || '');
+  if (S.hdrKey !== key) {
+    S.hdrKey = key;
+    const st = $('#plcStat');
+    st.lastChild.textContent = s.plc;
+    st.className = 'pill ' + s.plc.toLowerCase();
+    st.title = s.fault || '';
+    const rb = $('#runBtn'), run = s.plc === 'RUN';
+    rb.textContent = run ? '■ STOP' : '▶ RUN';
+    rb.className = 'mode ' + (run ? 'stop' : 'run');
+    rb.dataset.next = run ? 'STOP' : 'RUN';
+  }
+  setText($('#scanInfo'), s.plc === 'RUN' ? `scan ${s.scanTime.toFixed(2)} ms / ${s.scanMs} ms` : (s.fault || `cycle ${s.scanMs} ms`));
   const un = s.alarms.filter(a => !a.acked).length;
-  $('#almBadge').textContent = un || '';
+  setText($('#almBadge'), String(un || ''));
   $('#forceBanner').hidden = !Object.keys(s.forces).length;
   $('#lotoBanner').hidden = !s.loto;
 }

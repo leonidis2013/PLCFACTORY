@@ -1,4 +1,5 @@
 'use strict';
+const setTxt = (el, v) => { v = String(v); if (el && el.textContent !== v) el.textContent = v; };   // no needless DOM writes (keeps clicks reliable)
 /* PLCFACTORY HMI runtime + drag-and-drop builder (800×480 logical canvas) */
 const HMI = (() => {
   const COLORS = { green: '#2ecc71', red: '#e74c3c', blue: '#3fa9f5', amber: '#f5a623', gray: '#8a96a3', white: '#e8eef4' };
@@ -112,7 +113,7 @@ const HMI = (() => {
         upd = () => {
           const v = T(w), lo = +w.min || 0, hi = +w.max || 100, f = Math.max(0, Math.min(1, ((+v || 0) - lo) / (hi - lo || 1)));
           if (w.vert) { fill.style.height = (f * 100) + '%'; fill.style.width = '100%'; } else { fill.style.width = (f * 100) + '%'; fill.style.height = '100%'; }
-          bv.textContent = fmt(v, 1) + ' ' + (w.unit || ''); el.classList.toggle('bad', v === undefined);
+          setTxt(bv, fmt(v, 1) + ' ' + (w.unit || '')); el.classList.toggle('bad', v === undefined);
         };
         break;
       }
@@ -132,8 +133,8 @@ const HMI = (() => {
         upd = () => {
           const a = (S.snap && S.snap.alarms) || [], un = a.filter(x => !x.acked), act = a.filter(x => x.active);
           el.classList.toggle('act', un.length > 0); el.classList.toggle('ack', !un.length && act.length > 0);
-          el.firstChild.textContent = a.length ? `🔔 ${act.length} active${un.length ? ', ' + un.length + ' unacked' : ''}` : '✓ No alarms';
-          el.lastChild.textContent = a.length ? a[0].msg : '';
+          setTxt(el.firstChild, a.length ? `🔔 ${act.length} active${un.length ? ', ' + un.length + ' unacked' : ''}` : '✓ No alarms');
+          setTxt(el.lastChild, a.length ? a[0].msg : '');
         };
         break;
       case 'pid': {
@@ -151,12 +152,12 @@ const HMI = (() => {
         el.querySelectorAll('[data-m]').forEach(b => b.addEventListener('click', () => write(w.tag + '.MANUAL', b.dataset.m === '1')));
         upd = () => {
           const g = m => App.val(w.tag + '.' + m);
-          const ok = App.isFb(w.tag); el.classList.toggle('bad', !ok); if (!ok) { md.textContent = 'no PID named ' + w.tag; return; }
+          const ok = App.isFb(w.tag); el.classList.toggle('bad', !ok); if (!ok) { setTxt(md, 'no PID named ' + w.tag); return; }
           const lo = +w.min || 0, hi = +w.max || 100, f = v => Math.max(0, Math.min(100, ((+v || 0) - lo) / (hi - lo || 1) * 100));
           const ylo = g('Y_MIN'), yhi = g('Y_MAX'), fy = Math.max(0, Math.min(100, (g('Y') - ylo) / ((yhi - ylo) || 1) * 100));
           bars[0].style.height = f(g('SETPOINT')) + '%'; bars[1].style.height = f(g('ACTUAL')) + '%'; bars[2].style.height = fy + '%';
-          sp.textContent = fmt(g('SETPOINT'), 1); pv.textContent = fmt(g('ACTUAL'), 1); y.textContent = fmt(g('Y'), 1);
-          const man = g('MANUAL'); md.textContent = (man ? 'MANUAL' : 'AUTO') + (g('LIMITS_ACTIVE') ? ' · LIMIT' : '') + (w.unit ? ' · ' + w.unit : '');
+          setTxt(sp, fmt(g('SETPOINT'), 1)); setTxt(pv, fmt(g('ACTUAL'), 1)); setTxt(y, fmt(g('Y'), 1));
+          const man = g('MANUAL'); setTxt(md, (man ? 'MANUAL' : 'AUTO') + (g('LIMITS_ACTIVE') ? ' · LIMIT' : '') + (w.unit ? ' · ' + w.unit : ''));
           el.querySelectorAll('[data-m]').forEach(b => b.classList.toggle('on', (b.dataset.m === '1') === !!man));
           el.querySelectorAll('[data-p]').forEach(inp => { const pv = g(inp.dataset.p); if (document.activeElement !== inp) inp.value = pv === undefined ? '' : +(+pv).toFixed(3); });
         };
