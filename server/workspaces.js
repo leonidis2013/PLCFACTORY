@@ -184,7 +184,7 @@ class Workspaces {
     if (k === 'lesson') {
       const x = L[p.ws.slice(7)], m = p.mission || (p.mission = { hints: 0, solution: false });
       const i = LESSONS.indexOf(x);
-      return { kind: 'lesson', id: x.id, unit: x.unit, title: x.title, summary: x.summary, theory: x.theory, task: x.task, minutes: x.minutes,
+      return { kind: 'lesson', id: x.id, unit: x.unit, title: x.title, summary: x.summary, theory: m.lang === 'LD' ? x.ld.theory : x.theory, task: x.task, minutes: x.minutes,
         objectives: x.objectives.map(o => ({ id: o.id, text: o.text })), results: m.results || null, lang: m.lang === 'LD' ? 'LD' : 'ST',
         hints: (m.lang === 'LD' ? x.ld.hints : x.hints).slice(0, m.hints), hintCount: (m.lang === 'LD' ? x.ld.hints : x.hints).length,
         solutionViewed: !!m.solution, done: !!(this.prog(user).lessons[x.id] || {}).done, index: i + 1, total: LESSONS.length,

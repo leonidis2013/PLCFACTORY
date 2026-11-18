@@ -622,9 +622,171 @@ const LADDER = {
       R('Temperature loop', [], [O('COIL', 'Q_H1_On'), O('ST', 'TIC(ACTUAL := AI_Temp, SETPOINT := TempSP)'), O('MOV', 'TIC.Y', 'AO_H1_Power')])]),
     hints: ['Declare TIC : PID := (KP := 10.0, TN := 40.0); in Globals. Ladder has no PID box here — call it from an ST instruction: TIC(ACTUAL := AI_Temp, SETPOINT := TempSP).', 'Then MOV TIC.Y → AO_H1_Power and a coil Q_H1_On on an always-true rung (a rung with no contacts).', 'Overshooting? Lower KP or lengthen TN. Slow? Raise KP.'] },
 };
+/* ───────────── Ladder versions of the background text (shown when a lesson is in Ladder) ───────────── */
+const LDP = s => `<pre class="ldx">${s.replace(/^\n/, '')}</pre>`;
+const LD_THEORY = {
+  L01: `<p>A PLC reads every <b>input</b> into memory, runs your program top to bottom, then writes every <b>output</b>. That's one <i>scan</i>, repeated every few milliseconds. In ladder the program is a list of <b>rungs</b> between two power rails, solved left to right, top to bottom.</p>
+    <p>A <b>normally open (NO)</b> contact <code>] [</code> passes power while its tag is TRUE. A pushbutton with an NO contact is TRUE while you hold it. A <b>coil</b> <code>( )</code> writes TRUE to its tag while power reaches it, and FALSE when it doesn't.</p>
+    ${LDP(`
+ |    I_Button                          Q_Light  |
+ |----] [-------------------------------( )------|`)}
+    <p>In the editor: <b>+ Rung</b>, click the contact to set its tag, and set the coil's tag on the right.</p>`,
+  L02: `<p>Stop buttons are wired <b>normally closed (NC)</b>. With nothing pressed, current flows and the input is <b>TRUE</b>. Pressing the button <i>opens</i> the circuit, and so does a broken wire, a loose terminal or a blown fuse. Either way the input goes <b>FALSE</b>.</p>
+    <p>Watch out for the double negative. The ladder <b>contact type</b> describes how the <i>PLC</i> looks at the tag, not how the field device is wired. An NC-wired stop button is TRUE when healthy, so you examine it with an <b>NO contact</b> <code>] [</code>: power flows while the button is not pressed.</p>
+    ${LDP(`
+ |    I_Stop   (NC-wired, TRUE = healthy)    Q_Ready  |
+ |----] [------------------------------------( )------|`)}
+    <p>Using an NC contact <code>]/[</code> here would light Ready only when the button is pressed or the wire is broken — the opposite of fail-safe.</p>
+    <p><b>E-stops</b> are NC too, but an emergency stop is a <i>safety function</i>: it must work even if the PLC has crashed or been programmed wrong. So an E-stop is wired through a <b>safety relay</b> that removes power directly. That gets its own lesson after the seal-in.</p>`,
+  L03: `<p>A momentary Start button must keep a motor running after it's released. The motor's own run bit is used as a contact in a <b>branch in parallel</b> with Start. That's the <b>seal-in</b> (holding) contact:</p>
+    ${LDP(`
+ |    I_Start        I_Stop                     Run  |
+ |--+--] [--+--------] [-----------------------( )--|
+ |  |  Run  |
+ |  +--] [--+`)}
+    <p>In this editor a branch is a whole row, so you draw it as two rows that each end in the Stop contact: <code>I_Start · I_Stop</code> OR <code>Run · I_Stop</code>. Stop is in series on every path, so <b>Stop always wins</b>. (A latch <code>(S)</code> on Start with an unlatch <code>(R)</code> from Stop also works — but a seal-in drops out by itself on a power loss, which is why it is the standard.)</p>
+    <p>The output turns on the contactor, but that doesn't prove the motor runs. An overload relay can trip. Use the starter's <b>auxiliary contact</b> (running feedback) for status lights.</p>`,
+  L16: null,   // filled from the ST text below with a ladder rung
+  L04: `<p>A reversing starter swaps two phases with a second contactor. If <b>FWD and REV</b> close together, the result is a phase-to-phase short. Real panels use a mechanical interlock, auxiliary-contact interlocks <i>and</i> PLC interlocks.</p>
+    <p>Each direction gets its own seal-in rung, plus an <b>NC contact of the other direction</b> in series, so it can't start while the other is on:</p>
+    ${LDP(`
+ |    I_Fwd      I_Stop    Rev                 Fwd  |
+ |--+--] [--+----] [------]/[-----------------( )--|
+ |  |  Fwd  |
+ |  +--] [--+
+ |    I_Rev      I_Stop    Fwd                 Rev  |
+ |--+--] [--+----] [------]/[-----------------( )--|
+ |  |  Rev  |
+ |  +--] [--+`)}
+    <p>The operator must press Stop before reversing.</p>`,
+  L05: `<p>An <b>on-delay timer (TON)</b> box turns its done bit <code>.Q</code> on after its rung has been TRUE for the preset time. If the rung goes FALSE, it resets. The elapsed time is in <code>.ET</code>.</p>
+    ${LDP(`
+ |    StartReq                       +-- TON ------+  |
+ |----] [----------------------------| Timer: Warn |--|
+ |                                   | Preset: T#3s|  |
+ |                                   +-------------+  |
+ |    Warn.Q                                Q_Conveyor |
+ |----] [-----------------------------------( )-------|`)}
+    <p>The timer rung must be solved <b>every scan</b> — don't put conditions in front of it that you don't mean as the timer's input. Use <code>Warn.Q</code> as a contact anywhere else. Pre-start warnings are required by safety standards on equipment that can start automatically.</p>`,
+  L06: `<p>An <b>off-delay timer (TOF)</b> box turns <code>.Q</code> on immediately when its rung goes TRUE. When the rung goes FALSE, it keeps <code>.Q</code> on for the preset, then switches it off. That's the classic "run-on" for fans, lubrication pumps and conveyors clearing product.</p>
+    ${LDP(`
+ |    I_Heat                         +-- TOF --------+  |
+ |----] [-------------+--------------| Timer: RunOn  |--|
+ |                    |              | Preset: T#10s |  |
+ |                    |              +---------------+  |
+ |                    |                  Q_HeaterLamp   |
+ |                    +--------------------( )----------|
+ |    RunOn.Q                                  Q_Fan   |
+ |----] [--------------------------------------( )-----|`)}
+    <p>One rung can drive several outputs: add them with <b>+ output</b>.</p>`,
+  L07: `<p>An <b>up counter (CTU)</b> box adds 1 to <code>.CV</code> each time its rung goes from FALSE to TRUE (a <b>rising edge</b>), and sets <code>.Q</code> when <code>CV ≥ preset</code>. A <b>RES</b> instruction on another rung resets it to zero.</p>
+    ${LDP(`
+ |    I_PE                           +-- CTU ---------+  |
+ |----] [----------------------------| Counter: Batch |--|
+ |                                   | Preset: 5      |  |
+ |    I_Reset                        +----------------+  |
+ |----] [------------------------------------( RES Batch )|`)}
+    <p>A photoeye stays TRUE while a part blocks it. The counter only counts the edge, so one part counts as one. Use <code>Batch.Q</code> as an NC contact in the run rung to stop when the batch is complete.</p>`,
+  L08: `<p>An input stays TRUE for many scans while a button is held. A <b>one-shot</b> — the <b>P</b> (positive transition) contact <code>]P[</code> — passes power for <b>exactly one scan</b> when its tag goes from FALSE to TRUE. Use it whenever an action must happen once per press: toggling, counting, stepping a sequence.</p>
+    <p>The classic ladder toggle is a one-shot followed by a <b>flip-flop</b> rung:</p>
+    ${LDP(`
+ |    I_Button                                OneShot |
+ |----]P[-------------------------------------( )-----|
+ |    OneShot     Lamp                           Lamp |
+ |--+--] [-------]/[--+--------------------------( )--|
+ |  |  OneShot     Lamp |
+ |  +--]/[-------] [--+`)}
+    <p>Without the one-shot, the lamp would flicker on and off every scan while the button is held.</p>`,
+  L09: `<p>Most transmitters send <b>4–20 mA</b>: 4 mA is 0 % of range, 20 mA is 100 %. The live zero at 4 mA lets you tell "empty" (4 mA) from a <b>broken wire</b> (0 mA). Under NAMUR NE43, below 3.6–3.8 mA means a fault.</p>
+    <p>In ladder, scaling uses <b>math boxes</b> on an always-true rung (a rung with no contacts), and <b>compare contacts</b> for limits:</p>
+    ${LDP(`
+ |                      +-- SUB ------+   +-- MUL --------+  |
+ |----------------------| mA - 4.0    |---| Level × 6.25  |--|
+ |                      | → Level     |   | → Level       |  |
+ |                      +-------------+   +---------------+  |
+ |    [ mA < 3.8 ]                                   TxFault |
+ |----] [------------------------------------------( )-------|`)}
+    <p>(16 mA span → 100 %, so the factor is 100 / 16 = 6.25.) On a fault the controller must fail <b>safe</b>: here, stop filling, because the level is unknown.</p>`,
+  L10: `<p>Opening a valve at "level &lt; 50" and closing it at "level ≥ 50" makes it cycle on every ripple. That's called <b>chattering</b>, and it wears out valves. Use two thresholds (<b>hysteresis</b>, a deadband): start filling at the low limit and stop at the high limit.</p>
+    <p>In ladder that's a <b>latch / unlatch</b> pair driven by compare contacts:</p>
+    ${LDP(`
+ |    [ Level <= 40.0 ]                        Filling |
+ |----] [------------------------------------( S )------|
+ |    [ Level >= 60.0 ]                        Filling |
+ |----] [------------------------------------( R )------|
+ |    Filling                                Q_Fill   |
+ |----] [------------------------------------( )--------|`)}`,
+  L11: `<p>Machines run in <b>steps</b>. Keep the step number in an INT and give every transition its own rung: <b>compare</b> the current step, AND the transition condition, then <b>MOV</b> the next step number in. Outputs get their own rungs, driven from the step number. That makes the logic easy to read and to troubleshoot (the HMI can show "Step 20").</p>
+    ${LDP(`
+ |    [ Step = 0 ]   I_Start                 +-- MOV ----+  |
+ |----] [------------] [---------------------| 10 → Step |--|
+ |                                           +-----------+  |
+ |    [ Step = 10 ]  [ Level >= 70.0 ]       +-- MOV ----+  |
+ |----] [------------] [---------------------| 20 → Step |--|
+ |                                           +-----------+  |
+ |    [ Step = 10 ]                                 Q_Fill |
+ |----] [-------------------------------------------( )----|`)}
+    <p>A timer that belongs to a step goes on its own rung with the compare as its input, e.g. <code>[ Step = 20 ] → TON MixTmr</code>. Watch the rung order: a transition taken early in the scan is seen by the rungs below it in the same scan.</p>`,
+  L12: `<p>An alarm has two independent states: <b>active</b> (the condition is true now) and <b>unacknowledged</b> (no operator has seen it yet). The standard light sequence is:</p>
+    <ul><li><b>Flashing</b>: new and unacknowledged.</li><li><b>Steady</b>: active and acknowledged.</li><li><b>Off</b>: cleared and acknowledged.</li></ul>
+    <p>A <b>deadband</b> (latch above the limit, unlatch a little below) stops the alarm from toggling. A <code>]P[</code> one-shot on the active bit latches "unacknowledged"; the Ack button unlatches it. The horn follows "unacknowledged".</p>
+    <p>A <b>flasher</b> is a timer that resets itself, plus a flip-flop:</p>
+    ${LDP(`
+ |    Blink.Q                         +-- TON ---------+  |
+ |----]/[-----------------------------| Timer: Blink   |--|
+ |                                    | Preset: T#500ms|  |
+ |                                    +----------------+  |
+ |    Blink.Q     Flash                           Flash   |
+ |--+--] [-------]/[--+---------------------------( )-----|
+ |  |  Blink.Q     Flash |
+ |  +--]/[-------] [--+`)}`,
+  L13: `<p>A sensor rarely sits where the action happens. Here a metal detector is 1.85 m upstream of the reject pusher, with several parts in between. The PLC must remember each part's result and use it when <i>that</i> part arrives: this is <b>tracking</b>.</p>
+    <p>When parts are counted at both ends, a <b>FIFO</b> made from a BOOL array does it. In ladder:</p>
+    <ul><li>Part <b>leaves</b> the detector — a <code>]N[</code> (falling edge) on its photoeye: store the result with an <b>ST</b> instruction <code>Fifo[N] := MetalSeen</code>, then <b>ADD</b> N + 1 → N.</li>
+    <li>Part <b>arrives</b> at the pusher — a <code>]P[</code> on that photoeye: <b>MOV</b> <code>Fifo[0]</code> → Reject, then <b>BSR</b> on Fifo (shifts every element one place toward index 0), then <b>SUB</b> N − 1 → N.</li></ul>
+    ${LDP(`
+ |    I_PE_Rej    [ N > 0 ]      +-- MOV -----------+ +-- BSR ----+ +-- SUB -------+  |
+ |----]P[---------] [------------| Fifo[0] → Reject |-| Fifo      |-| N - 1 → N    |--|
+ |                               +------------------+ +-----------+ +--------------+  |`)}
+    <p>Order matters: MOV before BSR. For fixed-pitch (indexing) machines, a <b>BSL</b> on every index does the same job.</p>`,
+  L14: `<p>A <b>user-defined type (UDT)</b> groups everything about one piece of equipment, so three pumps are an <code>ARRAY[1..3] OF PumpCtl</code> instead of a dozen loose tags. HMIs, alarms and code all use the same shape.</p>
+    <pre>TYPE PumpCtl : STRUCT
+  Cmd, Running : BOOL;
+  Starts       : INT;
+END_STRUCT; END_TYPE</pre>
+    <p>The type goes in <b>Data types</b> and the array in <b>Globals</b> — declarations are text in every IEC 61131-3 tool, ladder included. In the rungs, contacts, coils and boxes accept member paths:</p>
+    ${LDP(`
+ |    [ AI_Demand >= 1.5 ]                    Pumps[2].Cmd |
+ |----] [------------------------------+------( )----------|
+ |                                     |       Q_P2_Run    |
+ |                                     +------( )----------|
+ |    Pumps[2].Running            +-- ADD ---------------+  |
+ |----]P[-------------------------| Pumps[2].Starts + 1  |--|
+ |                                +----------------------+  |`)}
+    <p>Ladder has no FOR loop, so you write one rung per pump (or call an ST routine for the loop).</p>`,
+  L15: `<p>On/off control overshoots and cycles. A <b>PID</b> controller sets a continuous output from the error:</p>
+    <ul><li><b>P</b> reacts to the error now.</li><li><b>I</b> removes the steady offset.</li><li><b>D</b> damps fast changes.</li></ul>
+    <p>This ladder editor has no PID box, so the loop is called from an <b>ST</b> instruction on an always-true rung — the same as a PIDE/PID instruction in a real ladder routine — and the output is moved to the analog output:</p>
+    ${LDP(`
+ |                      +-- ST ----------------------------------------+  |
+ |----------------------| TIC(ACTUAL := AI_Temp, SETPOINT := TempSP)  |--|
+ |                      +----------------------------------------------+  |
+ |                      +-- MOV --------------------+                     |
+ |----------------------| TIC.Y → AO_H1_Power       |---------------------|
+ |                      +---------------------------+                     |`)}
+    <p>Tuning workflow:</p>
+    <ol><li>Start with P only and raise <code>KP</code> until the response is quick but not oscillating.</li><li>Add integral: start <code>TN</code> around the process time constant and shorten it until the offset goes away without overshoot.</li></ol>
+    <p>Use the Trend tab (pens <code>AI_Temp</code>, <code>TempSP</code>, <code>TIC.Y</code>). In this tank, cold water flows through constantly, so the heater must work all the time.</p>`,
+};
+
 for (const x of LESSONS) {
   const l = LADDER[x.id];
   x.ld = { starter: l.starter, solution: l.solution || (x.solution.pous[0].lang === 'LD' ? x.solution : null), hints: l.hints };
+  x.ld.theory = LD_THEORY[x.id] || (x.id === 'L16' ? x.theory.replace('<pre>Run := (I_Start OR Run) AND I_Stop AND I_SR1_OK;</pre>', LDP(`
+ |    I_Start      I_Stop    I_SR1_OK                 Run  |
+ |--+--] [--+------] [-------] [----------------------( )--|
+ |  |  Run  |
+ |  +--] [--+`)) : x.theory);
   if (x.solution.pous[0].lang === 'LD') {       // L03: the main solution is ladder — give ST learners an ST one
     x.ld.solution = x.solution;
     x.solution = ST('VAR\n  Run : BOOL;\nEND_VAR\nRun := (I_Start OR Run) AND I_Stop;\nQ_M1_Run := Run;\nQ_RunLamp := I_M1_Running;   (* aux contact, not the command *)\n');
