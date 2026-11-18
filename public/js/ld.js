@@ -16,6 +16,7 @@ const LDE = (() => {
     MUL: [['a', 'A'], ['b', 'B'], ['c', 'Dest = A × B']], DIV: [['a', 'A'], ['b', 'B'], ['c', 'Dest = A ÷ B']],
     BSL: [['a', 'Array'], ['b', 'Value shifted in (bit / record)']], BSR: [['a', 'Array'], ['b', 'Value shifted in (bit / record)']], ST: [['a', 'ST statement']],
   };
+  const debounce2 = (fn, ms) => { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; };
   const isBox = t => !['NO', 'NC', 'P', 'N', 'COIL', 'NCOIL', 'SET', 'RST'].includes(t);
   let host, pou, opts, sel = null, errRung = 0;
 
@@ -177,11 +178,19 @@ const LDE = (() => {
         i.onchange = apply; if (i.tagName === 'INPUT') i.oninput = () => { el[f] = i.value; opts.onChange(); const op = host.querySelector(`.el[data-id="${sel}"] .op`); if (op) op.textContent = i.value || '???'; };
         if (i.tagName === 'INPUT') i.onkeydown = e => { if (e.key === 'Enter') { sel = null; changed(); } };
       });
-      pp.querySelectorAll('[data-nt]').forEach(b => b.onclick = () => {
-        const k = b.dataset.nt, ty = pp.querySelector(`[data-nt-type="${k}"]`).value;
-        opts.declare(String(el[k]).trim(), ty); render();
-      });
-      pp.querySelectorAll('input[data-f]').forEach(i => i.addEventListener('change', () => render()));
+      // refresh only the "create tag" strip — a full re-render here would swallow the click that caused the blur
+      const refreshNew = () => {
+        pp.querySelectorAll('.newtag').forEach(n => n.remove());
+        const html = newTagHtml(el); if (!html) return;
+        pp.querySelector('.row:last-child').insertAdjacentHTML('beforebegin', html);
+        pp.querySelectorAll('[data-nt]').forEach(b => b.onclick = ev => {
+          ev.stopPropagation();
+          const k = b.dataset.nt, ty = pp.querySelector(`[data-nt-type="${k}"]`).value;
+          opts.declare(String(el[k]).trim(), ty); refreshNew();
+        });
+      };
+      refreshNew();
+      pp.querySelectorAll('input[data-f]').forEach(i => i.addEventListener('input', debounce2(refreshNew, 500)));
       pp.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
         const p = b.dataset.p;
         if (p === 'close') sel = null;
@@ -236,7 +245,11 @@ const LDE = (() => {
     });
   }
   function mount(h, p, o) { host = h; pou = p; opts = o; sel = null; errRung = 0; render(); }
-  function showError(rung) { errRung = rung || 0; render(); const e = host && host.querySelector('.rung.err'); if (e) e.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+  function showError(rung, quiet) {
+    errRung = rung || 0;
+    if (quiet) { if (host) host.querySelectorAll('.rung').forEach(r => r.classList.toggle('err', +r.dataset.r + 1 === errRung)); return; }   // no re-render: keep focus while typing
+    render(); const e = host && host.querySelector('.rung.err'); if (e) e.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
   function rerender() { render(); }
   document.addEventListener('click', e => { if (sel && host && !e.target.closest('.ldprops') && !e.target.closest('.el') && host.contains(e.target)) { sel = null; render(); } });
   return { mount, update, showError, rerender };

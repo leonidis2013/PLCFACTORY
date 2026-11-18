@@ -526,7 +526,16 @@ function renderGutter(errLine) {
 }
 code.addEventListener('scroll', () => { $('#gutter').scrollTop = code.scrollTop; });
 const saveDraft = debounce(() => { if (can('engineer')) api('PUT', '/api/source', canonUnits(S.units)); }, 1200);
-function edited(save = true) { S.editorDirty = isDirty(); progStatus(); if (save) saveDraft(); else saveDraft(); }
+function edited(save = true) { S.editorDirty = isDirty(); progStatus(); saveDraft(); liveCheck(); }
+/* Verify as you type (like an IDE): the error bar always describes what is in the editor now */
+const liveCheck = debounce(async () => {
+  if (!S.units || !can('engineer')) return;
+  if (!S.editorDirty) { showErr({ ok: true }, true); return; }
+  const seq = S.checkSeq = (S.checkSeq || 0) + 1, sent = JSON.stringify(canonUnits(S.units));
+  const r = await api('POST', '/api/check', JSON.parse(sent));
+  if (seq !== S.checkSeq || !S.editorDirty || sent !== JSON.stringify(canonUnits(S.units))) return;   // stale: something changed meanwhile
+  if (r && (r.ok || r.msg)) showErr(r, true);
+}, 700);
 code.addEventListener('input', () => { setUnitText(code.value); renderGutter(S.errLine); edited(); });
 code.addEventListener('keydown', e => {
   if (e.key === 'Tab') { e.preventDefault(); code.setRangeText('  ', code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input')); }
@@ -537,11 +546,11 @@ function progStatus(msg) {
   if (msg) { el.textContent = msg; return; }
   el.innerHTML = !S.info.hasProgram ? '<span class="warn">No program in the PLC</span>' : S.editorDirty ? '<span class="warn">● Edited — not downloaded</span>' : '✓ Matches the PLC';
 }
-function showErr(r) {
+function showErr(r, quiet) {
   const bar = $('#errBar');
-  if (r.ok) { bar.hidden = true; S.errLine = null; renderGutter(); if (S.units && curPou() && curPou().lang === 'LD') LDE.showError(0); return; }
+  if (r.ok) { bar.hidden = true; S.errLine = null; renderGutter(); if (S.units && curPou() && curPou().lang === 'LD') LDE.showError(0, quiet); return; }
   const id = r.unit ? unitIdByName(r.unit) : null;
-  if (id && id !== S.cur) { S.cur = id; renderProgram(); }
+  if (id && id !== S.cur) { if (quiet) { bar.hidden = false; bar.textContent = `${r.unit} · ${r.rung ? 'Rung ' + r.rung + ': ' : 'Line ' + r.line + ': '}${r.msg.replace(/^Rung \d+: /, '')}`; bar.onclick = () => { S.cur = id; renderProgram(); showErr(r); }; return; } S.cur = id; renderProgram(); }
   bar.hidden = false; bar.textContent = `${r.unit ? r.unit + ' · ' : ''}${r.rung ? '' : 'Line ' + r.line + ': '}${r.msg}`;
   const und = /Undeclared variable '([A-Za-z_]\w*)'/.exec(r.msg || '');
   if (und && can('engineer')) {
@@ -552,8 +561,8 @@ function showErr(r) {
     fix.querySelector('button').onclick = () => { declareTag(n, fix.querySelector('select').value); bar.hidden = true; renderProgram(); toast(`${n} declared — press Download`); };
     bar.appendChild(fix);
   }
-  if (r.rung) { S.errLine = null; LDE.showError(r.rung); bar.onclick = () => LDE.showError(r.rung); }
-  else { S.errLine = r.line; renderGutter(r.line); bar.onclick = () => gotoLine(r.line); gotoLine(r.line); }
+  if (r.rung) { S.errLine = null; LDE.showError(r.rung, quiet); bar.onclick = () => LDE.showError(r.rung); }
+  else { S.errLine = r.line; renderGutter(r.line); bar.onclick = () => gotoLine(r.line); if (!quiet) gotoLine(r.line); }
 }
 function gotoLine(n) {
   if (!n) return;
@@ -563,6 +572,7 @@ function gotoLine(n) {
   code.scrollTop = Math.max(0, (n - 6) * 20);
 }
 async function download(cold) {
+  S.checkSeq = (S.checkSeq || 0) + 1;
   const r = await api('POST', '/api/download', Object.assign(canonUnits(S.units), { cold }));
   showErr(r);
   if (r.ok) { toast((cold ? 'Downloaded (cold: memory reset)' : 'Downloaded to PLC') + (S.snap && S.snap.plc !== 'RUN' ? ' — the PLC is in STOP: press RUN to try it' : '')); await refreshProject(); }
