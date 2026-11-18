@@ -34,7 +34,7 @@ const MODES = (() => {
           <span class="row"><span class="small muted">New lessons in</span>${langSeg(W.lang, 'hLang')}<button class="primary" data-ws="${next.ws}">${done ? 'Continue' : 'Start'}: ${esc(next.title)}</button></span></div>` +
         units.map(u => `<div class="unit-h">${esc(u)}</div><div class="mlist">` + L.filter(x => x.unit === u).map(x => `<button class="mitem${x.done ? ' done' : ''}${W.current === x.ws ? ' cur' : ''}" data-ws="${x.ws}">
           <span class="num"><span>${L.indexOf(x) + 1}</span></span><span class="tx"><b>${esc(x.title)}</b><small>${esc(x.summary)}</small>
-          <span class="meta"><span class="chipk">${x.minutes} min</span>${x.done ? '<span class="chipk sandbox">passed</span>' : x.best ? `<span class="chipk">${x.best}/${x.objectives} objectives</span>` : x.started ? '<span class="chipk">started</span>' : ''}</span></span></button>`).join('') + '</div>').join('') + '</div>';
+          <span class="meta"><span class="chipk">${x.minutes} min</span>${x.grade ? `<span class="gradechip g${x.grade}">${x.grade} · ${x.score}</span>` : ''}${x.done ? '<span class="chipk sandbox">passed</span>' : x.best ? `<span class="chipk">${x.best}/${x.objectives} objectives</span>` : x.started ? '<span class="chipk">started</span>' : ''}</span></span></button>`).join('') + '</div>').join('') + '</div>';
     } else if (homeMode === 'chal') {
       sec = `<div class="hsec"><h2>Troubleshooting</h2><p class="sub">A working plant with something wrong — a failed sensor, a stuck valve, a bad setting or a programming error. Read the work order, investigate with trends, tags and the I/O view, repair it, then close the work order with the root cause. Faster, cleaner fixes score higher; replacing healthy parts costs points.</p>
         <div class="mlist">${C.map(x => `<button class="mitem${x.done ? ' done' : ''}${W.current === x.ws ? ' cur' : ''}" data-ws="${x.ws}"><span class="num"><span>${+x.id.slice(1)}</span></span>
@@ -114,6 +114,23 @@ const MODES = (() => {
   }
   const objList = (objs, results) => `<ul class="objs">${objs.map(o => { const r = results && results.find(x => x.id === o.id); return `<li class="${r ? (r.pass ? 'pass' : 'fail') : ''}"><span class="st"></span><span>${esc(o.text)}${r && !r.pass && r.msg ? `<span class="why">${esc(r.msg)}</span>` : ''}</span></li>`; }).join('')}</ul>`;
   const hintList = h => h.length ? `<ul class="hints">${h.map((x, i) => `<li><b>Hint ${i + 1}</b>${esc(x).replace(/`([^`]+)`/g, '<code>$1</code>')}</li>`).join('')}</ul>` : '';
+  function gradeCard(m) {
+    const q = m.quality;
+    if (!q) return '';
+    const P = q.parts, bar = (pts, of) => `<span class="gbar"><i style="width:${Math.round(pts / of * 100)}%"></i></span><span class="gpts"><b>${pts}</b> / ${of}</span>`;
+    const checks = P.robustness.checks.length ? `<ul class="gchecks">${P.robustness.checks.map(c => `<li class="${c.pass ? 'pass' : 'fail'}"><span class="st"></span><span><b>${esc(c.text)}</b> <span class="muted small">(${c.weight} pts)</span><span class="why">${esc(c.msg)}</span></span></li>`).join('')}</ul>`
+      : '<p class="muted small" style="margin:4px 0">Robustness is tested once every objective passes.</p>';
+    return `<div class="card grade"><div class="gtop">
+        <div class="gletter g${q.grade || 'X'}">${q.grade || '—'}</div>
+        <div class="grow"><h3 style="margin:0">${q.passed ? `Grade ${q.grade} · ${q.score} / 100` : `Not passed yet · ${q.score} / 100`}</h3>
+          <div class="small muted">${m.bestGrade ? `Best so far: ${m.bestGrade} (${m.bestScore})` : 'Your best grade is kept.'} Correctness 60 · robustness 25 · simplicity 15.</div></div></div>
+      <div class="gparts"><div><span>Correctness</span>${bar(P.correctness.pts, P.correctness.of)}<small>${esc(P.correctness.detail)}</small></div>
+        <div><span>Robustness</span>${bar(P.robustness.pts, P.robustness.of)}</div>
+        <div><span>Simplicity</span>${bar(P.simplicity.pts, P.simplicity.of)}<small>${q.passed ? '' : 'scored once every objective passes'}</small></div></div>
+      <details ${q.passed && q.score < 100 ? 'open' : ''}><summary class="small">How it was graded</summary>
+        <h4>Robustness</h4>${checks}
+        <h4>Simplicity</h4><ul class="gnotes">${P.simplicity.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details></div>`;
+  }
   function renderLesson() {
     const m = M, eng = can('engineer');
     const passed = m.results ? m.results.filter(r => r.pass).length : 0;
@@ -127,6 +144,7 @@ const MODES = (() => {
         <li>Use the <b>operator panel</b> under the machine view (hold a pushbutton, flip a selector) and watch the outputs, the 3D/2D view and the <b>Tags</b> tab.</li>
         <li>When it behaves, press <b>Check my program</b> below for the graded test.</li></ol></div>
       ${m.done && m.results && passed === m.results.length ? `<div class="done-banner"><span class="big">✓</span><div><b>Lesson passed.</b><div class="small muted">${m.solutionViewed ? 'You looked at the reference solution — try the next one without it!' : m.hints.length ? `Passed with ${m.hints.length} hint${m.hints.length > 1 ? 's' : ''}.` : 'Passed without hints. Nice work.'}</div></div><span class="grow"></span>${m.next ? `<button class="primary" id="mNext">Next lesson →</button>` : '<b>Path complete!</b>'}</div>` : ''}
+      ${gradeCard(m)}
       <div class="card"><div class="row between"><h3 style="margin:0">Objectives</h3>${m.results ? `<span class="small muted">${passed} of ${m.results.length} passed at the last check</span>` : '<span class="small muted">Not checked yet</span>'}</div>
         ${objList(m.objectives, m.results)}
         <div class="mbar"><button class="primary" id="mCheck" ${eng ? '' : 'disabled'}>Check my program</button>
@@ -141,7 +159,7 @@ const MODES = (() => {
       e.target.disabled = true; e.target.textContent = 'Checking…';
       const r = await api('POST', '/api/grade', {});
       if (!r.ok) { toast(r.msg, true); e.target.disabled = false; e.target.textContent = 'Check my program'; return; }
-      toast(r.done ? 'All objectives passed!' : `${r.passed} of ${r.total} objectives passed`, !r.done);
+      toast(r.done ? `All objectives passed — grade ${r.quality.grade} (${r.quality.score}/100)` : `${r.passed} of ${r.total} objectives passed`, !r.done);
       renderMission();
     };
     $('#mProg').onclick = () => setTab('program');

@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { normalizeProject } = require('./engine/runtime');
 const { grade } = require('./engine/grader');
+const { evaluate } = require('./engine/quality');
 const { LESSONS } = require('./curriculum/lessons');
 const { CHALLENGES, CAUSES } = require('./curriculum/challenges');
 const { catalog } = require('./plants/sandbox');
@@ -170,7 +171,7 @@ class Workspaces {
     return {
       practice: Object.values(this.plants).map(p => ({ id: p.id, name: p.name, blurb: p.blurb })),
       lessons: LESSONS.map(x => ({ id: x.id, ws: 'lesson-' + x.id, unit: x.unit, title: x.title, summary: x.summary, minutes: x.minutes, objectives: x.objectives.length,
-        done: !!(pr.lessons[x.id] || {}).done, best: (pr.lessons[x.id] || {}).passed || 0, started: fs.existsSync(this.file('lesson-' + x.id)) })),
+        done: !!(pr.lessons[x.id] || {}).done, best: (pr.lessons[x.id] || {}).passed || 0, grade: (pr.lessons[x.id] || {}).grade || null, score: (pr.lessons[x.id] || {}).score || 0, started: fs.existsSync(this.file('lesson-' + x.id)) })),
       challenges: CHALLENGES.map(x => ({ id: x.id, ws: 'chal-' + x.id, title: x.title, difficulty: x.difficulty, plant: x.plant, par: x.par,
         best: (pr.challenges[x.id] || {}).best || 0, done: !!(pr.challenges[x.id] || {}).best, started: fs.existsSync(this.file('chal-' + x.id)) })),
       sandboxes: this.sandboxes(), lang: this.lang(user),
@@ -191,7 +192,8 @@ class Workspaces {
       const x = L[p.ws.slice(7)], m = p.mission || (p.mission = { hints: 0, solution: false });
       const i = LESSONS.indexOf(x);
       return { kind: 'lesson', id: x.id, unit: x.unit, title: x.title, summary: x.summary, theory: m.lang === 'LD' ? x.ld.theory : x.theory, task: x.task, minutes: x.minutes,
-        objectives: x.objectives.map(o => ({ id: o.id, text: o.text })), results: m.results || null, lang: m.lang === 'LD' ? 'LD' : 'ST',
+        objectives: x.objectives.map(o => ({ id: o.id, text: o.text })), results: m.results || null, quality: m.quality || null,
+        bestGrade: (this.prog(user).lessons[x.id] || {}).grade || null, bestScore: (this.prog(user).lessons[x.id] || {}).score || 0, lang: m.lang === 'LD' ? 'LD' : 'ST',
         hints: (m.lang === 'LD' ? x.ld.hints : x.hints).slice(0, m.hints), hintCount: (m.lang === 'LD' ? x.ld.hints : x.hints).length,
         solutionViewed: !!m.solution, done: !!(this.prog(user).lessons[x.id] || {}).done, index: i + 1, total: LESSONS.length,
         prev: i > 0 ? 'lesson-' + LESSONS[i - 1].id : null, next: i < LESSONS.length - 1 ? 'lesson-' + LESSONS[i + 1].id : null };
@@ -217,13 +219,15 @@ class Workspaces {
     for (const s of proj.sensors) s.fault = 'none';
     const res = grade(this.plants, proj, x.objectives);
     const passed = res.filter(r => r.pass).length;
+    const q = evaluate(this.plants, proj, x, res);
     p.mission = p.mission || { hints: 0, solution: false };
-    p.mission.results = res;
+    p.mission.results = res; p.mission.quality = q;
     const pr = this.prog(user), e = pr.lessons[x.id] || (pr.lessons[x.id] = {});
     e.passed = Math.max(e.passed || 0, passed);
     if (passed === res.length && !e.done) { e.done = true; e.at = Date.now(); e.hints = p.mission.hints; e.solution = !!p.mission.solution; }
+    if (q.passed && q.score > (e.score || 0)) { e.score = q.score; e.grade = q.grade; e.gradeLang = q.parts.simplicity.lang; }
     this.writeProgress();
-    return { ok: true, results: res, passed, total: res.length, done: passed === res.length };
+    return { ok: true, results: res, passed, total: res.length, done: passed === res.length, quality: q };
   }
   hint(p) {
     const k = kindOf(p.ws);

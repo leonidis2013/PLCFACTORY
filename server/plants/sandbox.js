@@ -429,7 +429,7 @@ function makeSandbox(rawLayout) {
           const d = Math.abs(it.pos - cp);
           if (it.state === 'belt' && cs.x > 0.05) {
             if (d <= 0.09 && cs.x > (cs.prev || 0)) { it.state = 'push'; it.cyl = cy.id; }
-            else if (d < 0.2) it.state = 'jam';
+            else if (d < 0.15) it.state = 'jam';   // plate (0.1 m) clips a 0.16 m part
           }
           if (it.state === 'push' && it.cyl === cy.id) {
             it.lat = Math.max(it.lat, cs.x);

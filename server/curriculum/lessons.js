@@ -250,7 +250,7 @@ IF Edge.Q THEN Lamp := NOT Lamp; END_IF;</pre>
   },
   // ───────────────────────── 3 · Analog & process ─────────────────────────
   {
-    id: 'L09', tabs: ['io'], unit: 'Analog & process', title: 'Analog scaling: 4–20 mA', minutes: 15,
+    id: 'L09', powerUpOK: true, tabs: ['io'], unit: 'Analog & process', title: 'Analog scaling: 4–20 mA', minutes: 15,
     summary: 'Scale a current loop to engineering units and detect a broken wire.',
     theory: `<p>Most transmitters send <b>4–20 mA</b>: 4 mA is 0 % of range, 20 mA is 100 %. The live zero at 4 mA lets you tell "empty" (4 mA) from a <b>broken wire</b> (0 mA). Under NAMUR NE43, below 3.6–3.8 mA means a fault.</p>
       <pre>Level := (mA - 4.0) / 16.0 * 100.0;      (* 0–100 % *)
@@ -471,7 +471,7 @@ END_FOR;
   },
   // ───────────────────────── 5 · Control ─────────────────────────
   {
-    id: 'L15', tabs: ['trend'], unit: 'Closed-loop control', title: 'PID: tank temperature', minutes: 25,
+    id: 'L15', powerUpOK: true, tabs: ['trend'], unit: 'Closed-loop control', title: 'PID: tank temperature', minutes: 25,
     summary: 'Tune a PID loop to hold temperature against a cooling load.',
     theory: `<p>On/off control overshoots and cycles. A <b>PID</b> controller sets a continuous output from the error:</p>
       <ul><li><b>P</b> reacts to the error now.</li><li><b>I</b> removes the steady offset.</li><li><b>D</b> damps fast changes.</li></ul>

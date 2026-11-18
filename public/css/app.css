@@ -614,3 +614,28 @@ body:not(.home-open) #home{display:none}
 .plan.edit .comp{cursor:grab}
 .plan .sel .selbox{stroke:var(--pl-sel);stroke-width:1.5;stroke-dasharray:4 3;fill:none}
 .plan .bad{fill:#e5484d}
+
+/* ---------- lesson grade ---------- */
+.grade .gtop{display:flex;gap:14px;align-items:center}
+.gletter{width:52px;height:52px;border-radius:12px;display:flex;align-items:center;justify-content:center;font:700 26px var(--sans);background:var(--surface-3);color:var(--muted);flex:none}
+.gletter.gA{background:var(--green-soft);color:var(--green)} .gletter.gB{background:var(--accent-soft);color:var(--accent)}
+.gletter.gC,.gletter.gD{background:var(--amber-soft);color:var(--amber)} .gletter.gF{background:var(--red-soft);color:var(--red)}
+.gparts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:12px 0 6px}
+@media (max-width:700px){.gparts{grid-template-columns:1fr}}
+.gparts>div{display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+.gparts>div>span:first-child{font-weight:600;color:var(--muted)}
+.gparts b{font:600 13px var(--mono)}
+.gbar{display:block;height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden}
+.gbar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.grade h4{margin:10px 0 4px;font:600 12.5px var(--sans);color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.gchecks{list-style:none;padding:0;margin:0}
+.gchecks li{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+.gchecks .st{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid var(--line-2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-top:1px}
+.gchecks li.pass .st{background:var(--green);border-color:var(--green);color:#fff} .gchecks li.pass .st::before{content:"✓"}
+.gchecks li.fail .st{border-color:var(--red);color:var(--red)} .gchecks li.fail .st::before{content:"✕"}
+.gchecks .why{display:block;color:var(--muted);font-size:12.5px}
+.gchecks li.fail .why{color:var(--red)}
+.gnotes{margin:0;padding-left:18px;font-size:13px}
+.gradechip{font:600 10.5px var(--mono);padding:0 7px;border-radius:999px;line-height:17px;background:var(--surface-3);color:var(--muted)}
+.gradechip.gA{background:var(--green-soft);color:var(--green)} .gradechip.gB{background:var(--accent-soft);color:var(--accent)}
+.gradechip.gC,.gradechip.gD{background:var(--amber-soft);color:var(--amber)}
