@@ -61,14 +61,22 @@ const LDE = (() => {
     }
     return '';
   }
+  const fmtv = v => v === undefined ? '—' : typeof v === 'boolean' ? (v ? '1' : '0') : (+v).toFixed(Number.isInteger(+v) ? 0 : 2);
+  const opVal = x => { const t = String(x || '').trim(); if (!t) return undefined; if (/^-?\d+(\.\d+)?$/.test(t)) return +t; return App.val(t); };
+  function liveText(el) {
+    if (!el.a) return '—';
+    if (['TON', 'TOF', 'TP'].includes(el.t)) { const et = App.val(el.a + '.ET'), q = App.val(el.a + '.Q'); return et === undefined ? 'not in PLC yet' : `ET ${(et / 1000).toFixed(1)} s · Q ${q ? 1 : 0}`; }
+    if (['CTU', 'CTD'].includes(el.t)) { const cv = App.val(el.a + '.CV'), pv = App.val(el.a + '.PV'), q = App.val(el.a + '.Q'); return cv === undefined ? 'not in PLC yet' : `CV ${cv} / ${pv !== undefined ? pv : el.b} · Q ${q ? 1 : 0}`; }
+    if (el.t === 'CMP') return `${fmtv(opVal(el.a))} ${el.op || '='} ${fmtv(opVal(el.b))}`;
+    return '';
+  }
   function boxHtml(el) {
     const f = FIELDS[el.t] || [];
     let rows = '';
     if (el.t === 'CMP') rows = `<div class="bx-l">${esc2(el.a || '?')}</div><div class="bx-op">${esc2(el.op || '=')}</div><div class="bx-l">${esc2(el.b || '?')}</div>`;
     else rows = f.map(([k, lab]) => `<div class="bx-r"><span>${esc2(lab.split(' ')[0])}</span><b>${esc2(el[k] || '?')}</b></div>`).join('');
-    let live = '';
-    if (['TON', 'TOF', 'TP'].includes(el.t) && el.a) { const et = App.val(el.a + '.ET'), q = App.val(el.a + '.Q'); if (et !== undefined) live = `<div class="bx-live">ET ${(et / 1000).toFixed(1)} s · Q ${q ? 1 : 0}</div>`; }
-    if (['CTU', 'CTD'].includes(el.t) && el.a) { const cv = App.val(el.a + '.CV'); if (cv !== undefined) live = `<div class="bx-live">CV ${cv}</div>`; }
+    // live row is always present so it starts updating as soon as the instance exists in the PLC
+    const live = ['TON', 'TOF', 'TP', 'CTU', 'CTD', 'CMP'].includes(el.t) ? `<div class="bx-live">${liveText(el)}</div>` : '';
     return `<div class="bx"><div class="bx-t">${el.t === 'CMP' ? 'CMP' : el.t}</div>${rows}${live}</div>`;
   }
   function elHtml(el, r, row, i, kind) {
@@ -227,6 +235,7 @@ const LDE = (() => {
           e.classList.toggle('pw', pw && st === true);
           const lv = e.querySelector('.lv');
           if (lv) { const v = value(el.a); lv.textContent = v === undefined ? '' : typeof v === 'boolean' ? (v ? '1' : '0') : (+v).toFixed(Number.isInteger(+v) ? 0 : 2); }
+          const bl = e.querySelector('.bx-live'); if (bl) { const t = liveText(el); if (bl.textContent !== t) bl.textContent = t; }
           if (el.t === 'P' || el.t === 'N') pw = false; else pw = pw && st === true;
         });
         // edges are TRUE for one scan only: trust the generated result instead
@@ -243,6 +252,7 @@ const LDE = (() => {
           const st = contactState(el);
           e.classList.toggle('on', st === true); e.classList.toggle('pw', pw && st === true);
           const lv = e.querySelector('.lv'); if (lv) { const v = value(el.a); lv.textContent = v === undefined ? '' : typeof v === 'boolean' ? (v ? '1' : '0') : (+v).toFixed(Number.isInteger(+v) ? 0 : 2); }
+          const bl = e.querySelector('.bx-live'); if (bl) { const t = liveText(el); if (bl.textContent !== t) bl.textContent = t; }
           pw = pw && st === true && el.t !== 'P' && el.t !== 'N';
         });
         rEl.querySelector('.rpost').classList.toggle('pw', rungPw);
@@ -256,7 +266,7 @@ const LDE = (() => {
         e.classList.toggle('on', !!st);
         e.classList.toggle('pw', rungPw);
         const lv = e.querySelector('.lv'); if (lv) { const v = value(el.a); lv.textContent = v === undefined ? '' : typeof v === 'boolean' ? (v ? '1' : '0') : (+v).toFixed(2); }
-        if (isBox(el.t)) { const bl = e.querySelector('.bx-live'); if (bl && ['TON', 'TOF', 'TP'].includes(el.t)) { const et = App.val(el.a + '.ET'), q = App.val(el.a + '.Q'); if (et !== undefined) bl.textContent = `ET ${(et / 1000).toFixed(1)} s · Q ${q ? 1 : 0}`; } if (bl && ['CTU', 'CTD'].includes(el.t)) { const cv = App.val(el.a + '.CV'); if (cv !== undefined) bl.textContent = 'CV ' + cv; } }
+        if (isBox(el.t)) { const bl = e.querySelector('.bx-live'); if (bl) { const t = liveText(el); if (bl.textContent !== t) bl.textContent = t; } }
       });
       rEl.classList.toggle('pw', rungPw);
     });
