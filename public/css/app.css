@@ -795,3 +795,17 @@ header #wsBtn .chipk{background:rgba(255,255,255,.14);color:var(--chrome-ink);bo
 .ld .el.todo:not(.box){background:color-mix(in srgb,var(--amber) 16%,transparent);border-radius:4px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--amber) 55%,transparent)}
 .ld .el.todo .op{color:var(--amber);font-weight:600}
 .ld .el.box.todo .bx{background:color-mix(in srgb,var(--amber) 12%,var(--surface));border-color:var(--amber)}
+/* one wire line per rung row (Logix-style): items hang from the wire instead of being centred, so tall
+   instruction boxes (CMP, TON, MOV…) connect at their top row and the wire stays straight */
+.lrow{align-items:flex-start}
+.lrow>.wseg{margin-top:31px}
+.lrow>.add{margin-top:20px}
+.el.box{padding-top:16px}
+.bx-bits{top:38px}
+.el.box{margin-right:0;padding:16px 30px 2px 10px;background:linear-gradient(var(--wire),var(--wire)) 0 31px/100% 2px no-repeat;border-radius:0}
+.el.box:hover,.el.box.sel{background-color:transparent}
+.el.box.sel .bx{outline:2px solid var(--accent);outline-offset:1px}
+.ld.online .el.box.pw{background-image:linear-gradient(var(--green),var(--green))}
+.el.box .bx{position:relative;z-index:1}
+.bx-bits{right:-28px;top:22px}
+.el.box .bx{overflow:visible}
