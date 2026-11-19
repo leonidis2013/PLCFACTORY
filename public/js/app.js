@@ -531,10 +531,10 @@ function edited(save = true) { S.editorDirty = isDirty(); progStatus(); saveDraf
 /* Errors are only checked when you press Check or Download. After an edit, an old error stays visible but is
    marked as being from the last check, so it is never mistaken for the current state of the editor. */
 function markErrStale() {
+  // an edit invalidates the last Check/Download result: clear it. Errors only appear again on Check or Download.
   const bar = $('#errBar');
-  if (bar.hidden || bar.classList.contains('stale')) return;
-  bar.classList.add('stale');
-  bar.insertAdjacentHTML('afterbegin', '<span class="stale-tag">From the last check — press Check to re-verify · </span>');
+  if (bar.hidden) return;
+  bar.hidden = true; bar.classList.remove('stale'); S.errLine = null; renderGutter();
   if (S.units && curPou() && curPou().lang === 'LD') LDE.showError(0, true);
 }
 const chipsLater = debounce(() => renderIoChips(), 800);

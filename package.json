@@ -1,6 +1,6 @@
 {
   "name": "plcfactory",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "description": "PLC & SCADA training simulator: IEC 61131-3 Structured Text soft PLC, HMI builder, alarms, trends, Modbus TCP and 2D/3D virtual plants.",
   "main": "server/index.js",
   "scripts": {

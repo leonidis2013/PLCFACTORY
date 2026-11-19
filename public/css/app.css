@@ -791,3 +791,7 @@ header #wsBtn .chipk{background:rgba(255,255,255,.14);color:var(--chrome-ink);bo
 #hmiComm{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(10,14,20,.78);color:#ffd2d2;text-align:center;z-index:5;font:14px var(--sans)}
 #hmiComm b{font-size:20px;color:#ff6b6b;letter-spacing:.05em}
 #hmiComm[hidden]{display:none}
+/* an instruction that still needs a tag: a soft, non-error notice (errors only after Check / Download) */
+.ld .el.todo:not(.box){background:color-mix(in srgb,var(--amber) 16%,transparent);border-radius:4px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--amber) 55%,transparent)}
+.ld .el.todo .op{color:var(--amber);font-weight:600}
+.ld .el.box.todo .bx{background:color-mix(in srgb,var(--amber) 12%,var(--surface));border-color:var(--amber)}

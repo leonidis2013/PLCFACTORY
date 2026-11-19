@@ -85,9 +85,9 @@ const LDE = (() => {
   }
   function elHtml(el, r, row, i, kind) {
     const id = `${r}:${row}:${i}`;
-    const selc = sel === id ? ' sel' : '';
-    if (isBox(el.t)) return `<div class="el box ${el.t}${selc}" data-id="${id}" data-k="${kind}">${boxHtml(el)}</div>`;
-    return `<div class="el ${el.t}${selc}" data-id="${id}" data-k="${kind}" title="${LOGIX[el.t] || ''}"><div class="op">${esc2(el.a || '???')}</div>${sym(el)}<div class="lv"></div></div>`;
+    const selc = (sel === id ? ' sel' : '') + (String(el.a || '').trim() ? '' : ' todo');
+    if (isBox(el.t)) return `<div class="el box ${el.t}${selc}" data-id="${id}" data-k="${kind}" title="${String(el.a || '').trim() ? '' : 'Needs a tag'}">${boxHtml(el)}</div>`;
+    return `<div class="el ${el.t}${selc}" data-id="${id}" data-k="${kind}" title="${String(el.a || '').trim() ? LOGIX[el.t] || '' : 'Needs a tag'}"><div class="op">${esc2(el.a || '???')}</div>${sym(el)}<div class="lv"></div></div>`;
   }
 
   function render() {
@@ -190,7 +190,7 @@ const LDE = (() => {
           if (f === 't') { if (el.t === 'CMP' && !el.op) el.op = '='; if (['TON', 'TOF', 'TP'].includes(el.t) && !el.b) el.b = 'T#1s'; if (['CTU', 'CTD'].includes(el.t) && !el.b) el.b = '10'; changed(); }
           else opts.onChange();
         };
-        i.onchange = apply; if (i.tagName === 'INPUT') i.oninput = () => { el[f] = i.value; opts.onChange(); const op = host.querySelector(`.el[data-id="${sel}"] .op`); if (op) op.textContent = i.value || '???'; };
+        i.onchange = apply; if (i.tagName === 'INPUT') i.oninput = () => { el[f] = i.value; opts.onChange(); const op = host.querySelector(`.el[data-id="${sel}"] .op`); if (op) op.textContent = i.value || '???'; const e = host.querySelector(`.el[data-id="${sel}"]`); if (e && f === 'a') e.classList.toggle('todo', !i.value.trim()); };
         if (i.tagName === 'INPUT') i.onkeydown = e => { if (e.key === 'Enter') { sel = null; changed(); } };
       });
       // refresh only the "create tag" strip — a full re-render here would swallow the click that caused the blur
