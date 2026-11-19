@@ -67,7 +67,7 @@ const SCENES3D = (() => {
     pipeY(-0.35, y0 + H + 0.05, y0 + H + 0.35, 0, 0.06);
     valve3d(objs, [-1.8, y0 + H + 0.35, 0], vp);
     if (v.qin > 0.01) objs.push(cyl([-0.35, y0 + (H * lev + H) / 2, 0], 0.035, H * (1 - lev), BLUE, { a: 0.55 }));
-    labels.push({ p: [-1.8, y0 + H + 0.75, 0], t: `XV-101 ${Math.round(vp * 100)}%`, cls: vp > 0.5 ? 'on' : '' });
+    labels.push({ p: [-1.8, y0 + H + 0.75, 0], t: `XV-101 ${vp > 0.97 ? 'OPEN' : vp < 0.03 ? 'CLOSED' : 'MOVING'}`, cls: vp > 0.5 ? 'on' : '' });
     // outlet + pump
     pipeY(0, 0.25, y0, 0, 0.07);
     pipeX(0, 1.7, 0.25, 0, 0.07);
@@ -285,7 +285,7 @@ const SCENES3D = (() => {
     const V = (key, p, labelP, txt) => {
       valve3d(objs, p, vv[key]);
       const pos = vv[key], tag = txt.split(' ')[0];
-      labels.push({ p: labelP, t: pos > 0.97 ? `${txt} OPEN` : pos < 0.03 ? tag : `${tag} ${Math.round(pos * 100)}%`, cls: pos > 0.5 ? 'on' : 'dim' });
+      labels.push({ p: labelP, t: pos > 0.97 ? `${tag} OPEN` : pos < 0.03 ? `${tag} CLOSED` : `${tag} MOVING`, cls: pos > 0.5 ? 'on' : 'dim' });
     };
     // XV-01 media (top left)
     pipeX(-2.2, -0.2, y0 + H + 0.3, 0.15, 0.04); pipeY(-0.2, y0 + H + 0.1, y0 + H + 0.3, 0.15, 0.04);

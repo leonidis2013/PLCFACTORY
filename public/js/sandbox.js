@@ -2,6 +2,13 @@
 /* Sandbox machines: 3D scene, 2D schematic, operator panel and the drag-and-drop machine builder.
    Layout units are metres; plan x → 3D x, plan y → 3D z. */
 const SBX = (() => {
+  /* an on/off valve is binary: OPEN / CLOSED, or OPENING / CLOSING while it strokes. Only control valves show a % position. */
+  const lastPos = {};
+  const valveTxt = (id, pos) => {
+    const prev = lastPos[id] === undefined ? pos : lastPos[id]; lastPos[id] = pos;
+    if (pos > 0.97) return 'OPEN'; if (pos < 0.03) return 'CLOSED';
+    return pos >= prev ? 'OPENING' : 'CLOSING';
+  };
   const PI = Math.PI;
   const clampN = (v, a, b) => Math.max(a, Math.min(b, v));
   const escS = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -114,7 +121,7 @@ const SBX = (() => {
           const pos = v ? s.pos : 0, cl = pos > 0.97 ? 'on' : pos > 0.03 ? '' : 'off';
           g = `<path d="M-14 -9 L14 9 L14 -9 L-14 9 Z" class="ln ${cl}" ${cl === '' ? 'style="fill:#e8a317"' : ''}/>` +
             (c.type === 'cvalve' ? `<path d="M-9 -16 Q0 -30 9 -16 Z" class="ln"/><line x1="0" y1="-16" x2="0" y2="0" class="ln"/>` : `<rect x="-6" y="-22" width="12" height="9" rx="2" class="ln"/><line x1="0" y1="-13" x2="0" y2="0" class="ln"/>`);
-          sub = v ? `${Math.round(pos * 100)} %` : (c.type === 'cvalve' ? 'control' : 'on/off'); box = [-18, -34, 36, 46];
+          sub = v ? (c.type === 'cvalve' ? `${Math.round(pos * 100)} %` : valveTxt(c.id, pos)) : (c.type === 'cvalve' ? 'control 0–100 %' : 'on/off'); box = [-18, -34, 36, 46];
           break;
         }
         case 'pump': {
@@ -127,14 +134,14 @@ const SBX = (() => {
           const pw = v ? s.pwr : 0, burnt = v && v.faults && v.faults[`${c.id}.burnt`];
           g = `<path d="M-22 18 L-15 8 L-8 28 L-1 8 L6 28 L13 8 L20 18" fill="none" style="stroke:${burnt ? '#555' : pw > 0.02 ? `hsl(15,90%,${40 + pw * 20}%)` : 'var(--pl-line)'};stroke-width:3"/>`;
           box = [-25, 4, 50, 28]; lab = false; sub = '';
-          g += `<text x="26" y="24" class="s">${escS(c.name)}${v ? ' ' + Math.round(pw * 100) + '%' : ''}</text>`;
+          g += `<text x="26" y="24" class="s">${escS(c.name)}${v ? ' ' + (p.scr ? Math.round(pw * 100) + '%' : pw > 0.01 ? 'ON' : 'OFF') : ''}</text>`;
           break;
         }
         case 'motor': {
           const on = v && Math.abs(s.spd) > 0.05, ol = v && s.ol;
           g = `<circle r="15" class="ln ${ol ? 'bad' : on ? 'on' : 'off'}"/><text y="4.5" text-anchor="middle" class="t" style="fill:${on || ol ? '#fff' : 'var(--pl-text)'}">M</text>`;
           if (m[p.attach]) g += `<line x1="0" y1="15" x2="0" y2="${tankGeo(m[p.attach]).R * S * 1.2 + 4}" class="ln"/>`;
-          sub = v ? (ol ? 'OVERLOAD' : on ? `${Math.round(s.spd * 100)} %` : 'stopped') : `${p.amps} A`; box = [-19, -19, 38, 38];
+          sub = v ? (ol ? 'OVERLOAD' : on ? (p.vfd ? `${Math.round(s.spd * 100)} %` : 'running') : 'stopped') : `${p.amps} A`; box = [-19, -19, 38, 38];
           break;
         }
         case 'conveyor': {
@@ -257,7 +264,7 @@ const SBX = (() => {
           const g = tankGeo(t), pw = s.pwr || 0, burnt = v.faults && v.faults[`${c.id}.burnt`];
           const hc = burnt ? '#2b2b2b' : mixC('#6b4a40', '#ff4a1a', pw);
           for (let i = 0; i < 10; i++) { const an = i / 10 * 2 * PI, rr = g.R * 0.62; objs.push(box([x + Math.cos(an) * rr, g.y0 + 0.07, z + Math.sin(an) * rr], [0.05, 0.05, g.R * 0.35], hc, { r: [0, -an, 0], e: pw > 0.05 ? 0.5 * pw : 0 })); }
-          if (pw > 0.01 || burnt) lab([x + g.R * 0.6, g.y0 + 0.1, z + g.R * 0.7], burnt ? `${c.name} BURNED OUT` : `${c.name} ${Math.round(pw * 100)}%`, burnt ? 'bad' : 'on');
+          if (pw > 0.01 || burnt) lab([x + g.R * 0.6, g.y0 + 0.1, z + g.R * 0.7], burnt ? `${c.name} BURNED OUT` : `${c.name} ${p.scr ? Math.round(pw * 100) + '%' : 'ON'}`, burnt ? 'bad' : 'on');
           break;
         }
         case 'valve': case 'cvalve': case 'pump': {
@@ -281,7 +288,7 @@ const SBX = (() => {
             objs.push(box([x, h, z], [0.2, 0.13, 0.13], col));
             objs.push(cyl([x, h + 0.13, z], 0.025, 0.14, DARK));
             if (c.type === 'cvalve') objs.push(sph([x, h + 0.24, z], 0.1, col)); else objs.push(box([x, h + 0.23, z], [0.12, 0.08, 0.12], col));
-            lab([x, h + 0.45, z], `${c.name} ${Math.round(s.pos * 100)}%`, s.pos > 0.5 ? 'on' : '');
+            lab([x, h + 0.45, z], `${c.name} ${c.type === 'cvalve' ? Math.round(s.pos * 100) + '%' : valveTxt(c.id + '3', s.pos)}`, s.pos > 0.5 ? 'on' : '');
           }
           break;
         }
@@ -292,13 +299,13 @@ const SBX = (() => {
             objs.push(box([t.x, top + 0.18, t.y], [0.24, 0.3, 0.24], col));
             objs.push(cyl([t.x, g.y0 + g.H / 2 + 0.05, t.y], 0.02, g.H - 0.05, STEEL));
             for (const k of [0, PI / 2]) objs.push(box([t.x, g.y0 + 0.22, t.y], [g.R * 1.1, 0.03, 0.09], STEEL, { r: [0.35, s.ang * PI / 180 + k, 0] }));
-            lab([t.x, top + 0.45, t.y], `${c.name} ${s.ol ? 'OVERLOAD' : on ? Math.round(s.spd * 100) + '%' : 'off'}`, s.ol ? 'bad' : on ? 'on' : '');
+            lab([t.x, top + 0.45, t.y], `${c.name} ${s.ol ? 'OVERLOAD' : on ? (p.vfd ? Math.round(s.spd * 100) + '%' : 'running') : 'off'}`, s.ol ? 'bad' : on ? 'on' : '');
           } else {
             objs.push(box([x, 0.08, z], [0.5, 0.06, 0.32], DARK));
             objs.push(cyl([x, 0.28, z], 0.15, 0.4, col, { r: [0, 0, PI / 2], s: [0.15, 0.4, 0.15] }));
             objs.push(cyl([x + 0.28, 0.28, z], 0.025, 0.16, STEEL, { r: [0, 0, PI / 2], s: [0.025, 0.16, 0.025] }));
             objs.push(box([x + 0.37, 0.28, z], [0.03, 0.2, 0.06], '#ddd', { r: [s.ang * PI / 180, 0, 0] }));
-            lab([x, 0.6, z], `${c.name} ${s.ol ? 'OVERLOAD' : on ? Math.round(s.spd * 100) + '%' : 'off'}`, s.ol ? 'bad' : on ? 'on' : '');
+            lab([x, 0.6, z], `${c.name} ${s.ol ? 'OVERLOAD' : on ? (p.vfd ? Math.round(s.spd * 100) + '%' : 'running') : 'off'}`, s.ol ? 'bad' : on ? 'on' : '');
           }
           break;
         }
